@@ -172,8 +172,6 @@ chmod +x init-data.sh
 
 # Create docker-compose.yml
 cat > docker-compose.yml <<EOF
-version: '3.8'
-
 volumes:
   db_storage:
   n8n_storage:
