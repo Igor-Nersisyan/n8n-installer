@@ -1,3 +1,4 @@
+```bash
 # Download installer
 wget https://raw.githubusercontent.com/Igor-Nersisyan/n8n-installer/main/install-supabase.sh
 
