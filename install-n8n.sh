@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # n8n Simple Installer v2.2 - Production Ready with CSS Fix
-# Простая и надежная установка без излишеств
 # For Ubuntu 20.04, 22.04, 24.04
 
 set -euo pipefail
