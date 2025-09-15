@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# n8n Simple Installer v2.1 - Production Ready
+# n8n Simple Installer v2.2 - Production Ready with CSS Fix
 # Простая и надежная установка без излишеств
 # For Ubuntu 20.04, 22.04, 24.04
 
@@ -46,7 +46,7 @@ fi
 
 clear
 echo "=========================================="
-echo "     n8n Simple Installer v2.1"
+echo "     n8n Simple Installer v2.2"
 echo "      Production Ready Setup"
 echo "=========================================="
 echo ""
@@ -56,6 +56,7 @@ echo "  ✓ Automatic local backups"
 echo "  ✓ Log rotation"
 echo "  ✓ Auto-cleanup old executions (7 days)"
 echo "  ✓ Optimized nginx configuration"
+echo "  ✓ Fixed CSS/JS loading on first access"
 echo ""
 
 # Get domain and email
@@ -353,7 +354,7 @@ echo "[$(date)] Maintenance completed"
 EOF
 chmod +x ${N8N_DIR}/maintenance.sh
 
-# Configure nginx with optimized location blocks
+# Configure nginx with optimized location blocks and CSS fix
 print_message "Configuring nginx..."
 cat > /etc/nginx/sites-available/n8n <<EOF
 # Rate limiting
@@ -370,6 +371,22 @@ server {
     server_name ${DOMAIN};
     
     client_max_body_size 100M;
+    
+    # Location for static assets - FIX for CSS/JS loading issues
+    location ~* \.(css|js|jpg|jpeg|gif|png|ico|svg|woff|woff2|ttf|eot)\$ {
+        proxy_pass http://127.0.0.1:${N8N_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Accept-Encoding gzip;
+        
+        # Caching for static files
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+        proxy_buffering on;
+    }
     
     # Location for webhooks and SSE (long timeouts)
     location ~ ^/(webhook|rest/sse) {
@@ -401,7 +418,7 @@ server {
         proxy_cache off;
     }
     
-    # Location for UI and regular API (standard timeouts)
+    # Location for UI and regular API (optimized for first load)
     location / {
         # Rate limiting
         limit_req zone=n8n_limit burst=20 nodelay;
@@ -420,14 +437,15 @@ server {
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection \$connection_upgrade;
         
-        # Standard timeouts for UI and API
-        proxy_connect_timeout 60;
-        proxy_send_timeout 60;
-        proxy_read_timeout 60;
-        keepalive_timeout 60;
+        # Increased timeouts to prevent CSS loading errors
+        proxy_connect_timeout 120;
+        proxy_send_timeout 120;
+        proxy_read_timeout 120;
+        keepalive_timeout 120;
         
-        # Standard buffering for UI
-        proxy_buffering on;
+        # Disable buffering for better first-load experience
+        proxy_buffering off;
+        proxy_request_buffering off;
     }
     
     # Health check endpoint
@@ -598,7 +616,8 @@ echo "  ✓ Log rotation (max 30MB)"
 echo "  ✓ Auto-cleanup executions > 7 days"
 echo "  ✓ Optimized nginx configuration:"
 echo "    • Webhooks/SSE: 1-hour timeout"
-echo "    • UI/API: 60-second timeout"
+echo "    • UI/API: 120-second timeout"
+echo "    • Static files: Cached properly"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "IMPORTANT PATHS:"
