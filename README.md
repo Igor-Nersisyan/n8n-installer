@@ -72,7 +72,6 @@ You'll be prompted for:
 └── *.gz                 # Backup files
 ```
 
-
 ## 🛠️ Management Commands
 
 ### Service Control
@@ -149,37 +148,4 @@ docker stats
 
 # Restart to clear memory
 cd /opt/n8n && docker compose restart
-📊 Resource Usage
-Typical resource consumption:
 
-RAM: 1-2GB (idle), 2-4GB (active)
-CPU: 5-10% (idle), 20-50% (active)
-Disk: ~500MB (base) + workflows/execution data
-Network: Varies by workflow complexity
-
-🔄 Updates
-Update n8n
-bashcd /opt/n8n
-docker compose pull
-docker compose down
-docker compose up -d
-Update installer
-bashwget https://raw.githubusercontent.com/Igor-Nersisyan/n8n-installer/main/install-n8n.sh -O install-n8n-new.sh
-# Review changes, then use if needed
-🔒 Security Considerations
-
-✅ Firewall configured (ports 22, 80, 443 only)
-✅ PostgreSQL bound to localhost only
-✅ Auto-generated strong passwords
-✅ SSL/HTTPS enforced
-✅ Rate limiting enabled
-✅ Encrypted credentials storage
-
-🤝 Contributing
-Found a bug or have a suggestion? Please open an issue or submit a PR!
-📄 License
-MIT License - feel free to use in your projects!
-⭐ Support
-If this script saved you time, consider giving it a star on GitHub!
-
-Note: This is an independent project, not officially affiliated with n8n.
