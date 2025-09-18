@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# n8n Simple Installer v2.2 - Production Ready with CSS Fix
+# n8n Simple Installer v3.1 - Production Ready with Robust SSL, CSS Fix & Best Practices
 # For Ubuntu 20.04, 22.04, 24.04
 
 set -euo pipefail
@@ -14,7 +14,7 @@ NC='\033[0m'
 # Configuration
 N8N_DIR="/opt/n8n"
 BACKUP_DIR="/opt/backups/n8n"
-POSTGRES_PORT=5433  # Всегда 5433
+POSTGRES_PORT=5433  # Always 5433
 N8N_PORT=5678
 
 # Functions
@@ -32,8 +32,7 @@ print_warning() {
 
 # Check root
 if [[ $EUID -ne 0 ]]; then
-    print_error "This script must be run as root"
-    echo "Please run: sudo $0"
+    print_error "This script must be run as root. Please run: sudo $0"
     exit 1
 fi
 
@@ -45,15 +44,16 @@ fi
 
 clear
 echo "=========================================="
-echo "     n8n Simple Installer v2.2"
-echo "      Production Ready Setup"
+echo "     n8n Simple Installer v3.1"
+echo "  Production Ready & Robust SSL Setup"
 echo "=========================================="
 echo ""
 echo "Features:"
-echo "  ✓ PostgreSQL on port 5433"
+echo "  ✓ PostgreSQL on port ${POSTGRES_PORT}"
+echo "  ✓ Reliable two-stage SSL setup"
+echo "  ✓ DNS validation"
 echo "  ✓ Automatic local backups"
-echo "  ✓ Log rotation"
-echo "  ✓ Auto-cleanup old executions (7 days)"
+echo "  ✓ Log rotation & Auto-cleanup (7 days)"
 echo "  ✓ Optimized nginx configuration"
 echo "  ✓ Fixed CSS/JS loading on first access"
 echo ""
@@ -73,6 +73,7 @@ SERVER_IP=$(curl -s ifconfig.me || echo "unknown")
 
 # Install dig if needed
 if ! command -v dig &> /dev/null; then
+    apt-get update > /dev/null 2>&1
     apt-get install -y dnsutils > /dev/null 2>&1 || true
 fi
 
@@ -91,10 +92,10 @@ else
     print_message "Domain resolves to: $DNS_IP"
 fi
 
-# Install prerequisites
+# Install prerequisites (batch from v3.0 with ufw explicit check from v2.2)
 print_message "Installing prerequisites..."
 apt-get update > /dev/null 2>&1
-apt-get install -y curl wget openssl > /dev/null 2>&1
+apt-get install -y curl wget openssl nginx certbot python3-certbot-nginx ufw dnsutils > /dev/null 2>&1
 
 # Install Docker
 if ! command -v docker &> /dev/null; then
@@ -110,26 +111,11 @@ if ! docker compose version &> /dev/null 2>&1; then
     apt-get install -y docker-compose-plugin > /dev/null 2>&1
 fi
 
-# Install nginx
-if ! command -v nginx &> /dev/null; then
-    print_message "Installing nginx..."
-    apt-get install -y nginx > /dev/null 2>&1
-fi
 systemctl enable nginx > /dev/null 2>&1
 systemctl start nginx > /dev/null 2>&1
 
-# Install certbot
-if ! command -v certbot &> /dev/null; then
-    print_message "Installing Certbot..."
-    apt-get install -y certbot python3-certbot-nginx > /dev/null 2>&1
-fi
-
-# Configure firewall
+# Configure firewall (explicit from v2.2)
 print_message "Configuring firewall..."
-if ! command -v ufw &> /dev/null; then
-    apt-get install -y ufw > /dev/null 2>&1
-fi
-
 ufw allow 22/tcp > /dev/null 2>&1
 ufw allow 80/tcp > /dev/null 2>&1
 ufw allow 443/tcp > /dev/null 2>&1
@@ -158,7 +144,7 @@ POSTGRES_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
 POSTGRES_USER_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
 N8N_ENCRYPTION_KEY=$(openssl rand -hex 32)
 
-# Create .env
+# Create .env (full from v2.2)
 cat > .env <<EOF
 # Database
 POSTGRES_USER=postgres
@@ -194,7 +180,7 @@ N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
 N8N_PROXY_HOPS=1
 EOF
 
-# Create PostgreSQL init script
+# Create PostgreSQL init script (from v2.2)
 cat > init-data.sh <<'EOF'
 #!/bin/bash
 set -e
@@ -209,7 +195,7 @@ fi
 EOF
 chmod +x init-data.sh
 
-# Create docker-compose.yml without version attribute
+# Create docker-compose.yml (verbose full from v2.2)
 cat > docker-compose.yml <<EOF
 volumes:
   db_data:
@@ -296,66 +282,51 @@ services:
         max-file: "3"
 EOF
 
-# Create backup script
-cat > ${BACKUP_DIR}/backup.sh <<'EOF'
-#!/bin/bash
-# n8n Local Backup Script
+# === ROBUST SSL ACQUISITION (Phase 1 from v3.0) ===
+print_message "Creating webroot for SSL certificate validation..."
+mkdir -p "/var/www/${DOMAIN}/.well-known/acme-challenge"
+chown www-data:www-data "/var/www/${DOMAIN}" -R
 
-BACKUP_DIR="/opt/backups/n8n"
-DATE=$(date +%Y%m%d_%H%M%S)
-
-echo "[$(date)] Starting backup..."
-
-# Create backup directory if not exists
-mkdir -p $BACKUP_DIR
-
-# Backup database
-docker exec n8n-postgres pg_dump -U postgres n8n | gzip > $BACKUP_DIR/db_${DATE}.sql.gz
-echo "[$(date)] Database backed up"
-
-# Backup n8n files (workflows, credentials, settings)
-tar -czf $BACKUP_DIR/files_${DATE}.tar.gz \
-    /opt/n8n/docker-compose.yml \
-    /opt/n8n/.env \
-    /opt/n8n/n8n_storage \
-    2>/dev/null
-echo "[$(date)] Files backed up"
-
-# Remove backups older than 14 days
-find $BACKUP_DIR -name "*.gz" -mtime +14 -delete
-echo "[$(date)] Old backups cleaned"
-
-# Show backup sizes
-echo "[$(date)] Current backups:"
-ls -lh $BACKUP_DIR | tail -n 5
-
-echo "[$(date)] Backup completed successfully"
+print_message "Configuring temporary Nginx for SSL challenge..."
+cat > "/etc/nginx/sites-available/${DOMAIN}" << EOF
+server {
+    listen 80;
+    server_name ${DOMAIN};
+    
+    location /.well-known/acme-challenge/ {
+        root /var/www/${DOMAIN};
+    }
+    
+    location / {
+        return 404; # Temporarily block other requests
+    }
+}
 EOF
-chmod +x ${BACKUP_DIR}/backup.sh
 
-# Create maintenance script
-cat > ${N8N_DIR}/maintenance.sh <<'EOF'
-#!/bin/bash
-# Weekly maintenance script
+ln -sf "/etc/nginx/sites-available/${DOMAIN}" "/etc/nginx/sites-enabled/"
+rm -f /etc/nginx/sites-enabled/default
+nginx -t > /dev/null 2>&1
+systemctl restart nginx
 
-echo "[$(date)] Starting maintenance..."
+print_message "Obtaining SSL certificate via webroot..."
+if ! certbot certonly --webroot -w "/var/www/${DOMAIN}" -d "${DOMAIN}" --non-interactive --agree-tos -m "${EMAIL}"; then
+    print_error "Certbot failed. Please check your DNS A record points to this server's IP."
+    print_error "Server IP: $SERVER_IP"
+    exit 1
+fi
+print_message "SSL certificate obtained successfully."
 
-# Clean docker images
-docker image prune -a -f
+# Create stronger SSL security files (from v3.0)
+if [ ! -f "/etc/letsencrypt/options-ssl-nginx.conf" ]; then
+    wget -O /etc/letsencrypt/options-ssl-nginx.conf https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf > /dev/null 2>&1
+fi
+if [ ! -f "/etc/letsencrypt/ssl-dhparams.pem" ]; then
+    openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048 > /dev/null 2>&1
+fi
 
-# Clean docker volumes
-docker volume prune -f
-
-# Vacuum journal logs
-journalctl --vacuum-time=10d --vacuum-size=500M
-
-echo "[$(date)] Maintenance completed"
-EOF
-chmod +x ${N8N_DIR}/maintenance.sh
-
-# Configure nginx with optimized location blocks and CSS fix
-print_message "Configuring nginx..."
-cat > /etc/nginx/sites-available/n8n <<EOF
+# === FINAL NGINX CONFIGURATION (Phase 2 from v3.0 with CSS fix from v2.2) ===
+print_message "Configuring final Nginx production setup..."
+cat > "/etc/nginx/sites-available/${DOMAIN}" <<EOF
 # Rate limiting
 limit_req_zone \$binary_remote_addr zone=n8n_limit:10m rate=10r/s;
 
@@ -369,9 +340,27 @@ server {
     listen 80;
     server_name ${DOMAIN};
     
+    location /.well-known/acme-challenge/ {
+        root /var/www/${DOMAIN};
+    }
+    
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ${DOMAIN};
+    
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
     client_max_body_size 100M;
     
-    # Location for static assets - FIX for CSS/JS loading issues
+    # Location for static assets - FIX for CSS/JS loading issues (from v2.2)
     location ~* \.(css|js|jpg|jpeg|gif|png|ico|svg|woff|woff2|ttf|eot)\$ {
         proxy_pass http://127.0.0.1:${N8N_PORT};
         proxy_http_version 1.1;
@@ -387,7 +376,7 @@ server {
         proxy_buffering on;
     }
     
-    # Location for webhooks and SSE (long timeouts)
+    # Location for webhooks and SSE (long timeouts) (from v2.2)
     location ~ ^/(webhook|rest/sse) {
         # Rate limiting
         limit_req zone=n8n_limit burst=20 nodelay;
@@ -417,7 +406,7 @@ server {
         proxy_cache off;
     }
     
-    # Location for UI and regular API (optimized for first load)
+    # Location for UI and regular API (optimized for first load) (from v2.2)
     location / {
         # Rate limiting
         limit_req zone=n8n_limit burst=20 nodelay;
@@ -455,19 +444,16 @@ server {
 }
 EOF
 
-ln -sf /etc/nginx/sites-available/n8n /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
 nginx -t > /dev/null 2>&1
 systemctl reload nginx
 
-# Start n8n
+# Start n8n (with extended wait from v3.0 and check from v2.2)
 print_message "Starting n8n..."
 docker compose down > /dev/null 2>&1 || true
 docker compose up -d
 
-# Wait for services with health check
 print_message "Waiting for services to start..."
-MAX_WAIT=120  # 2 minutes
+MAX_WAIT=180  # 3 minutes from v3.0
 WAIT_INTERVAL=5
 ELAPSED=0
 
@@ -485,13 +471,13 @@ done
 echo ""
 
 if [ $ELAPSED -ge $MAX_WAIT ]; then
-    print_error "n8n failed to start within 2 minutes"
+    print_error "n8n failed to start within 3 minutes"
     echo "Showing recent logs:"
     docker compose logs --tail=50
     exit 1
 fi
 
-# Check services
+# Check services (from v2.2)
 if docker ps | grep -q n8n && docker ps | grep -q n8n-postgres; then
     print_message "All services started successfully"
 else
@@ -500,16 +486,64 @@ else
     exit 1
 fi
 
-# Get SSL certificate
-print_message "Getting SSL certificate..."
-if certbot --nginx -d ${DOMAIN} --non-interactive --agree-tos --email ${EMAIL} --redirect 2>/dev/null; then
-    print_message "SSL certificate obtained successfully"
-else
-    print_warning "SSL certificate setup failed - you can configure it later with:"
-    echo "  certbot --nginx -d ${DOMAIN}"
-fi
+# Create backup script (verbose from v2.2)
+cat > ${BACKUP_DIR}/backup.sh <<'EOF'
+#!/bin/bash
+# n8n Local Backup Script
 
-# Setup cron jobs (prevent duplicates)
+BACKUP_DIR="/opt/backups/n8n"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+echo "[$(date)] Starting backup..."
+
+# Create backup directory if not exists
+mkdir -p $BACKUP_DIR
+
+# Backup database
+docker exec n8n-postgres pg_dump -U postgres n8n | gzip > $BACKUP_DIR/db_${DATE}.sql.gz
+echo "[$(date)] Database backed up"
+
+# Backup n8n files (workflows, credentials, settings)
+tar -czf $BACKUP_DIR/files_${DATE}.tar.gz \
+    /opt/n8n/docker-compose.yml \
+    /opt/n8n/.env \
+    /opt/n8n/n8n_storage \
+    2>/dev/null
+echo "[$(date)] Files backed up"
+
+# Remove backups older than 14 days
+find $BACKUP_DIR -name "*.gz" -mtime +14 -delete
+echo "[$(date)] Old backups cleaned"
+
+# Show backup sizes
+echo "[$(date)] Current backups:"
+ls -lh $BACKUP_DIR | tail -n 5
+
+echo "[$(date)] Backup completed successfully"
+EOF
+chmod +x ${BACKUP_DIR}/backup.sh
+
+# Create maintenance script (full from v2.2)
+cat > ${N8N_DIR}/maintenance.sh <<'EOF'
+#!/bin/bash
+# Weekly maintenance script
+
+echo "[$(date)] Starting maintenance..."
+
+# Clean docker images
+docker image prune -a -f
+
+# Clean docker volumes
+docker volume prune -f
+
+# Vacuum journal logs
+journalctl --vacuum-time=10d --vacuum-size=500M
+
+echo "[$(date)] Maintenance completed"
+EOF
+chmod +x ${N8N_DIR}/maintenance.sh
+
+# Setup cron jobs (from v2.2)
 print_message "Setting up automated tasks..."
 
 # Remove existing n8n related cron jobs and add new ones
@@ -523,7 +557,7 @@ echo "0 4 * * 0 ${N8N_DIR}/maintenance.sh >> ${N8N_DIR}/maintenance.log 2>&1" >>
 crontab /tmp/crontab.tmp
 rm -f /tmp/crontab.tmp
 
-# Create safe restore script
+# Create safe restore script (verbose from v2.2)
 cat > ${BACKUP_DIR}/restore.sh <<'EOF'
 #!/bin/bash
 # n8n Safe Restore Script
@@ -597,7 +631,7 @@ echo "Services are starting up. Check status with: docker compose ps"
 EOF
 chmod +x ${BACKUP_DIR}/restore.sh
 
-# Final message with all important information
+# Final message (detailed from v2.2)
 echo ""
 echo "=========================================="
 echo -e "${GREEN}   Installation Completed!${NC}"
