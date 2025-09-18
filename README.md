@@ -72,8 +72,8 @@ You'll be prompted for:
 └── *.gz                 # Backup files
 ```
 
-Вот исправленная версия всех секций начиная с 🛠️ Management Commands:
-markdown## 🛠️ Management Commands
+
+## 🛠️ Management Commands
 
 ### Service Control
 ```bash
