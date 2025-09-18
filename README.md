@@ -29,17 +29,12 @@ A battle-tested installation script that sets up n8n workflow automation platfor
   - UI/API: 2 minutes
   - Static assets: 30-day cache
 
-### v2.2 Improvements
-- 🎨 **Fixed CSS/JS loading issues** on first access
-- 🚀 **Improved static file handling** with proper caching
-- ⏱️ **Extended UI timeouts** for heavy workflows
-
 ## 📋 Requirements
 
 - **OS**: Ubuntu 20.04, 22.04, or 24.04
-- **RAM**: Minimum 2GB (4GB recommended)
-- **CPU**: 2+ cores
-- **Storage**: 20GB+ free space
+- **RAM**: Minimum 1GB 
+- **CPU**: Minimum 1 core
+- **Storage**: Minimum 15 GB
 - **Network**: 
   - Root access
   - Public IP address
@@ -215,20 +210,6 @@ wget https://raw.githubusercontent.com/Igor-Nersisyan/n8n-installer/main/install
 ## 🤝 Contributing
 
 Found a bug or have a suggestion? Please open an issue or submit a PR!
-
-## 📝 Changelog
-
-### v2.2 (2025-09-15)
-- Fixed CSS/JS loading issues on first access
-- Improved static file caching
-- Extended UI timeouts to 120 seconds
-- Better proxy buffering settings
-
-### v2.1 (2025-09-10)
-- Initial public release
-- Automated backup system
-- PostgreSQL on port 5433
-- Optimized nginx configuration
 
 ## 📄 License
 
