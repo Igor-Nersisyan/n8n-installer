@@ -72,7 +72,8 @@ You'll be prompted for:
 └── *.gz                 # Backup files
 ```
 
-## 🛠️ Management Commands
+Вот исправленная версия всех секций начиная с 🛠️ Management Commands:
+markdown## 🛠️ Management Commands
 
 ### Service Control
 ```bash
@@ -176,7 +177,6 @@ bashwget https://raw.githubusercontent.com/Igor-Nersisyan/n8n-installer/main/ins
 
 🤝 Contributing
 Found a bug or have a suggestion? Please open an issue or submit a PR!
-
 📄 License
 MIT License - feel free to use in your projects!
 ⭐ Support
