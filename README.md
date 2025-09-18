@@ -50,12 +50,14 @@ chmod +x install-n8n.sh
 
 # Run as root
 sudo ./install-n8n.sh
+```
+
 You'll be prompted for:
+- Domain name (e.g., `n8n.example.com`)
+- Email address (for SSL certificates)
 
-Domain name (e.g., n8n.example.com)
-Email address (for SSL certificates)
-
-📁 Installation Structure
+## 📁 Installation Structure
+```
 /opt/n8n/
 ├── docker-compose.yml    # Container configuration
 ├── .env                  # Environment variables & passwords
@@ -68,9 +70,13 @@ Email address (for SSL certificates)
 ├── backup.sh            # Backup script
 ├── restore.sh           # Restore script
 └── *.gz                 # Backup files
-🛠️ Management Commands
-Service Control
-bash# View logs
+```
+
+## 🛠️ Management Commands
+
+### Service Control
+```bash
+# View logs
 cd /opt/n8n && docker compose logs -f
 
 # Restart n8n
