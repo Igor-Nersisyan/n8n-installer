@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# n8n Simple Installer v3.1 - Production Ready with Robust SSL, CSS Fix & Best Practices
+# n8n Simple Installer v3.2 - Production Ready with Robust SSL, CSS Fix & Best Practices
+# Fixed service check, added modern n8n variables
 # For Ubuntu 20.04, 22.04, 24.04
 
 set -euo pipefail
@@ -44,7 +45,7 @@ fi
 
 clear
 echo "=========================================="
-echo "     n8n Simple Installer v3.1"
+echo "     n8n Simple Installer v3.2"
 echo "  Production Ready & Robust SSL Setup"
 echo "=========================================="
 echo ""
@@ -56,6 +57,7 @@ echo "  ✓ Automatic local backups"
 echo "  ✓ Log rotation & Auto-cleanup (7 days)"
 echo "  ✓ Optimized nginx configuration"
 echo "  ✓ Fixed CSS/JS loading on first access"
+echo "  ✓ Modern security settings (Task Runners)"
 echo ""
 
 # Get domain and email
@@ -92,7 +94,7 @@ else
     print_message "Domain resolves to: $DNS_IP"
 fi
 
-# Install prerequisites (batch from v3.0 with ufw explicit check from v2.2)
+# Install prerequisites
 print_message "Installing prerequisites..."
 apt-get update > /dev/null 2>&1
 apt-get install -y curl wget openssl nginx certbot python3-certbot-nginx ufw dnsutils > /dev/null 2>&1
@@ -114,7 +116,7 @@ fi
 systemctl enable nginx > /dev/null 2>&1
 systemctl start nginx > /dev/null 2>&1
 
-# Configure firewall (explicit from v2.2)
+# Configure firewall
 print_message "Configuring firewall..."
 ufw allow 22/tcp > /dev/null 2>&1
 ufw allow 80/tcp > /dev/null 2>&1
@@ -144,7 +146,7 @@ POSTGRES_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
 POSTGRES_USER_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
 N8N_ENCRYPTION_KEY=$(openssl rand -hex 32)
 
-# Create .env (full from v2.2)
+# Create .env with modern variables
 cat > .env <<EOF
 # Database
 POSTGRES_USER=postgres
@@ -161,6 +163,11 @@ WEBHOOK_URL=https://${DOMAIN}/
 N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
 GENERIC_TIMEZONE=UTC
 NODE_ENV=production
+
+# Security & Modern Features (n8n v1.70+)
+N8N_RUNNERS_ENABLED=true
+N8N_BLOCK_ENV_ACCESS_IN_NODE=true
+N8N_SECURE_COOKIE=true
 
 # Execution mode - regular (simple mode without Redis)
 EXECUTIONS_MODE=regular
@@ -180,7 +187,7 @@ N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
 N8N_PROXY_HOPS=1
 EOF
 
-# Create PostgreSQL init script (from v2.2)
+# Create PostgreSQL init script
 cat > init-data.sh <<'EOF'
 #!/bin/bash
 set -e
@@ -195,7 +202,7 @@ fi
 EOF
 chmod +x init-data.sh
 
-# Create docker-compose.yml (verbose full from v2.2)
+# Create docker-compose.yml
 cat > docker-compose.yml <<EOF
 volumes:
   db_data:
@@ -260,6 +267,9 @@ services:
       - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=\${N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE}
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=\${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS}
       - N8N_PROXY_HOPS=\${N8N_PROXY_HOPS}
+      - N8N_RUNNERS_ENABLED=\${N8N_RUNNERS_ENABLED}
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=\${N8N_BLOCK_ENV_ACCESS_IN_NODE}
+      - N8N_SECURE_COOKIE=\${N8N_SECURE_COOKIE}
     ports:
       - "127.0.0.1:${N8N_PORT}:5678"
     volumes:
@@ -282,7 +292,7 @@ services:
         max-file: "3"
 EOF
 
-# === ROBUST SSL ACQUISITION (Phase 1 from v3.0) ===
+# === ROBUST SSL ACQUISITION (Phase 1) ===
 print_message "Creating webroot for SSL certificate validation..."
 mkdir -p "/var/www/${DOMAIN}/.well-known/acme-challenge"
 chown www-data:www-data "/var/www/${DOMAIN}" -R
@@ -316,7 +326,7 @@ if ! certbot certonly --webroot -w "/var/www/${DOMAIN}" -d "${DOMAIN}" --non-int
 fi
 print_message "SSL certificate obtained successfully."
 
-# Create stronger SSL security files (from v3.0)
+# Create stronger SSL security files
 if [ ! -f "/etc/letsencrypt/options-ssl-nginx.conf" ]; then
     wget -O /etc/letsencrypt/options-ssl-nginx.conf https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf > /dev/null 2>&1
 fi
@@ -324,7 +334,7 @@ if [ ! -f "/etc/letsencrypt/ssl-dhparams.pem" ]; then
     openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048 > /dev/null 2>&1
 fi
 
-# === FINAL NGINX CONFIGURATION (Phase 2 from v3.0 with CSS fix from v2.2) ===
+# === FINAL NGINX CONFIGURATION (Phase 2) ===
 print_message "Configuring final Nginx production setup..."
 cat > "/etc/nginx/sites-available/${DOMAIN}" <<EOF
 # Rate limiting
@@ -360,7 +370,7 @@ server {
 
     client_max_body_size 100M;
     
-    # Location for static assets - FIX for CSS/JS loading issues (from v2.2)
+    # Location for static assets - FIX for CSS/JS loading issues
     location ~* \.(css|js|jpg|jpeg|gif|png|ico|svg|woff|woff2|ttf|eot)\$ {
         proxy_pass http://127.0.0.1:${N8N_PORT};
         proxy_http_version 1.1;
@@ -376,7 +386,7 @@ server {
         proxy_buffering on;
     }
     
-    # Location for webhooks and SSE (long timeouts) (from v2.2)
+    # Location for webhooks and SSE (long timeouts)
     location ~ ^/(webhook|rest/sse) {
         # Rate limiting
         limit_req zone=n8n_limit burst=20 nodelay;
@@ -406,7 +416,7 @@ server {
         proxy_cache off;
     }
     
-    # Location for UI and regular API (optimized for first load) (from v2.2)
+    # Location for UI and regular API (optimized for first load)
     location / {
         # Rate limiting
         limit_req zone=n8n_limit burst=20 nodelay;
@@ -447,13 +457,13 @@ EOF
 nginx -t > /dev/null 2>&1
 systemctl reload nginx
 
-# Start n8n (with extended wait from v3.0 and check from v2.2)
+# Start n8n
 print_message "Starting n8n..."
 docker compose down > /dev/null 2>&1 || true
 docker compose up -d
 
 print_message "Waiting for services to start..."
-MAX_WAIT=180  # 3 minutes from v3.0
+MAX_WAIT=180  # 3 minutes
 WAIT_INTERVAL=5
 ELAPSED=0
 
@@ -477,16 +487,41 @@ if [ $ELAPSED -ge $MAX_WAIT ]; then
     exit 1
 fi
 
-# Check services (from v2.2)
-if docker ps | grep -q n8n && docker ps | grep -q n8n-postgres; then
-    print_message "All services started successfully"
+# FIXED: Improved service check with compatibility fallback
+print_message "Verifying service status..."
+sleep 1  # Give Docker API a moment to stabilize
+
+# Try modern method first
+if docker compose ps --status=running 2>/dev/null | head -n1 > /dev/null; then
+    # New Docker Compose with --status support
+    HEALTHY_SERVICES=$(docker compose ps --status=running -q 2>/dev/null | wc -l)
+    if [ "$HEALTHY_SERVICES" -eq 2 ]; then
+        print_message "All services started successfully (${HEALTHY_SERVICES}/2 running)"
+    else
+        print_error "Service check failed. Expected 2 healthy services, found ${HEALTHY_SERVICES}"
+        docker compose ps
+        docker compose logs --tail=50
+        exit 1
+    fi
 else
-    print_error "Some services failed to start"
-    docker compose logs --tail=50
-    exit 1
+    # Fallback for older Docker Compose versions
+    print_message "Using legacy service check method..."
+    N8N_RUNNING=$(docker inspect -f '{{.State.Running}}' n8n 2>/dev/null || echo "false")
+    PG_RUNNING=$(docker inspect -f '{{.State.Running}}' n8n-postgres 2>/dev/null || echo "false")
+    
+    if [ "$N8N_RUNNING" = "true" ] && [ "$PG_RUNNING" = "true" ]; then
+        print_message "All services started successfully"
+    else
+        print_error "Service check failed"
+        print_error "n8n status: $N8N_RUNNING"
+        print_error "PostgreSQL status: $PG_RUNNING"
+        docker compose ps
+        docker compose logs --tail=50
+        exit 1
+    fi
 fi
 
-# Create backup script (verbose from v2.2)
+# Create backup script
 cat > ${BACKUP_DIR}/backup.sh <<'EOF'
 #!/bin/bash
 # n8n Local Backup Script
@@ -523,7 +558,7 @@ echo "[$(date)] Backup completed successfully"
 EOF
 chmod +x ${BACKUP_DIR}/backup.sh
 
-# Create maintenance script (full from v2.2)
+# Create maintenance script
 cat > ${N8N_DIR}/maintenance.sh <<'EOF'
 #!/bin/bash
 # Weekly maintenance script
@@ -543,21 +578,21 @@ echo "[$(date)] Maintenance completed"
 EOF
 chmod +x ${N8N_DIR}/maintenance.sh
 
-# Setup cron jobs (from v2.2)
+# Setup cron jobs
 print_message "Setting up automated tasks..."
 
 # Remove existing n8n related cron jobs and add new ones
 (crontab -l 2>/dev/null || echo "") | grep -v "${BACKUP_DIR}/backup.sh" | grep -v "${N8N_DIR}/maintenance.sh" > /tmp/crontab.tmp || true
 
-# Add new cron jobs
-echo "0 3 * * * ${BACKUP_DIR}/backup.sh >> ${BACKUP_DIR}/backup.log 2>&1" >> /tmp/crontab.tmp
-echo "0 4 * * 0 ${N8N_DIR}/maintenance.sh >> ${N8N_DIR}/maintenance.log 2>&1" >> /tmp/crontab.tmp
+# Add new cron jobs - using single quotes to prevent glob expansion
+echo '0 3 * * * '"${BACKUP_DIR}/backup.sh"' >> '"${BACKUP_DIR}/backup.log"' 2>&1' >> /tmp/crontab.tmp
+echo '0 4 * * 0 '"${N8N_DIR}/maintenance.sh"' >> '"${N8N_DIR}/maintenance.log"' 2>&1' >> /tmp/crontab.tmp
 
 # Install new crontab
 crontab /tmp/crontab.tmp
 rm -f /tmp/crontab.tmp
 
-# Create safe restore script (verbose from v2.2)
+# Create safe restore script
 cat > ${BACKUP_DIR}/restore.sh <<'EOF'
 #!/bin/bash
 # n8n Safe Restore Script
@@ -631,7 +666,7 @@ echo "Services are starting up. Check status with: docker compose ps"
 EOF
 chmod +x ${BACKUP_DIR}/restore.sh
 
-# Final message (detailed from v2.2)
+# Final message
 echo ""
 echo "=========================================="
 echo -e "${GREEN}   Installation Completed!${NC}"
@@ -647,6 +682,9 @@ echo "  ✓ Daily automated backups at 3:00 AM"
 echo "  ✓ Weekly maintenance at 4:00 AM Sunday"
 echo "  ✓ Log rotation (max 30MB)"
 echo "  ✓ Auto-cleanup executions > 7 days"
+echo "  ✓ Task Runners enabled (modern security)"
+echo "  ✓ Environment variables blocked in Code nodes"
+echo "  ✓ Secure cookies for HTTPS"
 echo "  ✓ Optimized nginx configuration:"
 echo "    • Webhooks/SSE: 1-hour timeout"
 echo "    • UI/API: 120-second timeout"
