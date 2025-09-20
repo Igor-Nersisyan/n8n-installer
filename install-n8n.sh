@@ -338,7 +338,7 @@ fi
 print_message "Configuring final Nginx production setup..."
 cat > "/etc/nginx/sites-available/${DOMAIN}" <<EOF
 # Rate limiting
-limit_req_zone \$binary_remote_addr zone=n8n_limit:10m rate=10r/s;
+limit_req_zone \$binary_remote_addr zone=n8n_limit:10m rate=50r/s;
 
 # WebSocket upgrade map
 map \$http_upgrade \$connection_upgrade {
@@ -389,7 +389,7 @@ server {
     # Location for webhooks and SSE (long timeouts)
     location ~ ^/(webhook|rest/sse) {
         # Rate limiting
-        limit_req zone=n8n_limit burst=20 nodelay;
+        limit_req zone=n8n_limit burst=100 nodelay;
         
         # Proxy settings
         proxy_pass http://127.0.0.1:${N8N_PORT};
@@ -419,7 +419,7 @@ server {
     # Location for UI and regular API (optimized for first load)
     location / {
         # Rate limiting
-        limit_req zone=n8n_limit burst=20 nodelay;
+        limit_req zone=n8n_limit burst=100 nodelay;
         
         # Proxy settings
         proxy_pass http://127.0.0.1:${N8N_PORT};
@@ -436,10 +436,10 @@ server {
         proxy_set_header Connection \$connection_upgrade;
         
         # Increased timeouts to prevent CSS loading errors
-        proxy_connect_timeout 120;
-        proxy_send_timeout 120;
-        proxy_read_timeout 120;
-        keepalive_timeout 120;
+        proxy_connect_timeout 30;
+        proxy_send_timeout 300;
+        proxy_read_timeout 300;
+        keepalive_timeout 300;
         
         # Disable buffering for better first-load experience
         proxy_buffering off;
