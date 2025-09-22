@@ -39,7 +39,7 @@ A battle-tested installation script that sets up n8n workflow automation platfor
 - **OS**: Ubuntu 20.04, 22.04, or 24.04
 - **RAM**: Minimum 2GB (for queue mode and Redis)
 - **CPU**: Minimum 1 core (scale workers for more)
-- **Storage**: Minimum 20 GB
+- **Storage**: Minimum 10 GB
 - **Network**: 
   - Root access
   - Public IP address
