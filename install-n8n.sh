@@ -1,159 +1,166 @@
 #!/bin/bash
 
-# n8n Simple Installer v3.2 - Production Ready with Robust SSL, CSS Fix & Best Practices
-# Fixed service check, added modern n8n variables
+# n8n Installer v3.22 - Production Grade Edition (Fixed Binary Preview & Trust Proxy)
 # For Ubuntu 20.04, 22.04, 24.04
 
 set -euo pipefail
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-# Configuration
+# --- Configuration ---
 N8N_DIR="/opt/n8n"
 BACKUP_DIR="/opt/backups/n8n"
-POSTGRES_PORT=5433  # Always 5433
+POSTGRES_PORT=5433
 N8N_PORT=5678
 
-# Functions
-print_message() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+# --- Colors and Functions ---
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+print_message() { echo -e "${GREEN}[INFO]${NC} $1"; }
+print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+
+# --- Port Check Function ---
+check_port_availability() {
+    local port=$1
+    local service=$2
+    if ss -tuln | grep -q ":${port}\b"; then
+        print_error "Port ${port} is already in use (needed for ${service})"
+        print_warning "Please free the port or modify the configuration"
+        exit 1
+    fi
+    print_message "Port ${port} is available for ${service}"
 }
 
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+# --- DNS Check Function ---
+check_dns_resolution() {
+    local domain=$1
+    print_message "Checking DNS resolution for ${domain}..."
+    
+    if ! command -v dig &> /dev/null; then
+        apt-get install -y dnsutils > /dev/null 2>&1
+    fi
+    
+    local dns_ips=$(dig +short ${domain} A)
+    if [ -z "$dns_ips" ]; then
+        print_error "DNS resolution failed for ${domain}"
+        print_warning "Please ensure your DNS A record is configured correctly"
+        exit 1
+    fi
+    
+    local server_ip=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || \
+                      curl -s --max-time 5 icanhazip.com 2>/dev/null || \
+                      hostname -I | awk '{print $1}' || \
+                      echo "unknown")
+    
+    print_message "Domain ${domain} resolves to: $(echo $dns_ips | tr '\n' ' ')"
+    
+    if [ "$server_ip" != "unknown" ] && ! echo "$dns_ips" | grep -q "$server_ip"; then
+        print_warning "Domain doesn't resolve to this server's IP ($server_ip)"
+        read -p "Do you want to continue anyway? (y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    fi
 }
 
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
+# --- Initial Checks ---
+if [[ $EUID -ne 0 ]]; then print_error "This script must be run as root."; exit 1; fi
+if ! grep -q "Ubuntu" /etc/os-release; then print_error "This script is for Ubuntu only."; exit 1; fi
 
-# Check root
-if [[ $EUID -ne 0 ]]; then
-    print_error "This script must be run as root. Please run: sudo $0"
-    exit 1
-fi
-
-# Check Ubuntu
-if ! grep -q "Ubuntu" /etc/os-release; then
-    print_error "This script is for Ubuntu only"
+if [ -d "${N8N_DIR}" ]; then
+    print_error "Installation directory ${N8N_DIR} already exists."
+    print_warning "To reinstall, please first:"
+    print_warning "1. Backup your data: ${BACKUP_DIR}/backup.sh"
+    print_warning "2. Remove the directory: sudo rm -rf ${N8N_DIR}"
     exit 1
 fi
 
 clear
 echo "=========================================="
-echo "     n8n Simple Installer v3.2"
-echo "  Production Ready & Robust SSL Setup"
+echo "   n8n Installer v3.22 (Production Grade)"
 echo "=========================================="
 echo ""
 echo "Features:"
-echo "  ✓ PostgreSQL on port ${POSTGRES_PORT}"
-echo "  ✓ Reliable two-stage SSL setup"
-echo "  ✓ DNS validation"
-echo "  ✓ Automatic local backups"
-echo "  ✓ Log rotation & Auto-cleanup (7 days)"
-echo "  ✓ Optimized nginx configuration"
-echo "  ✓ Fixed CSS/JS loading on first access"
-echo "  ✓ Modern security settings (Task Runners)"
+echo "  ✓ Queue Mode with Redis 7 for high performance"
+echo "  ✓ PostgreSQL database (properly initialized)"
+echo "  ✓ Automatic daily backups"
+echo "  ✓ Worker management script for easy scaling"
+echo "  ✓ Fixed CSS/JS loading issues"
+echo "  ✓ Fixed worker concurrency configuration"
+echo "  ✓ Proper trust proxy configuration"
+echo "  ✓ Automatic SSL renewal"
+echo "  ✓ Fixed binary data preview (text files)"
 echo ""
 
-# Get domain and email
+# --- User Input ---
 read -p "Enter your domain name (e.g., n8n.example.com): " DOMAIN
 read -p "Enter your email address (for SSL certificates): " EMAIL
-
-echo ""
-print_message "Domain: $DOMAIN"
-print_message "Email: $EMAIL"
 echo ""
 
-# Check DNS
-print_message "Checking DNS..."
-SERVER_IP=$(curl -s ifconfig.me || echo "unknown")
+# --- Port Availability Checks ---
+print_message "Checking port availability..."
+check_port_availability ${N8N_PORT} "n8n"
+check_port_availability ${POSTGRES_PORT} "PostgreSQL"
 
-# Install dig if needed
-if ! command -v dig &> /dev/null; then
-    apt-get update > /dev/null 2>&1
-    apt-get install -y dnsutils > /dev/null 2>&1 || true
-fi
-
-DNS_IP=$(dig +short $DOMAIN 2>/dev/null | tail -n1 || echo "")
-
-if [ -z "$DNS_IP" ]; then
-    print_warning "Domain $DOMAIN does not resolve yet"
-    echo "Server IP: $SERVER_IP"
-    echo "Please ensure DNS A record points to this IP"
-    echo ""
-    read -p "Continue anyway? (y/n) " -n 1 -r
-    echo ""
-    [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
-else
-    print_message "Server IP: $SERVER_IP"
-    print_message "Domain resolves to: $DNS_IP"
-fi
-
-# Install prerequisites
+# --- System Preparation ---
 print_message "Installing prerequisites..."
-apt-get update > /dev/null 2>&1
+apt-get update > /dev-null 2>&1
 apt-get install -y curl wget openssl nginx certbot python3-certbot-nginx ufw dnsutils > /dev/null 2>&1
 
-# Install Docker
-if ! command -v docker &> /dev/null; then
-    print_message "Installing Docker..."
+print_message "Installing Docker & Docker Compose..."
+if ! command -v docker &> /dev/null; then 
     curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
     sh /tmp/get-docker.sh > /dev/null 2>&1
     rm /tmp/get-docker.sh
 fi
-
-# Install Docker Compose
-if ! docker compose version &> /dev/null 2>&1; then
-    print_message "Installing Docker Compose..."
+if ! docker compose version &> /dev/null 2>&1; then 
     apt-get install -y docker-compose-plugin > /dev/null 2>&1
 fi
 
-systemctl enable nginx > /dev/null 2>&1
-systemctl start nginx > /dev/null 2>&1
+systemctl enable --now nginx > /dev/null 2>&1
 
-# Configure firewall
+# Firewall configuration
 print_message "Configuring firewall..."
 ufw allow 22/tcp > /dev/null 2>&1
 ufw allow 80/tcp > /dev/null 2>&1
 ufw allow 443/tcp > /dev/null 2>&1
 
 if ! ufw status | grep -q "Status: active"; then
-    print_message "Enabling firewall..."
-    ufw default deny incoming > /dev/null 2>&1
-    ufw default allow outgoing > /dev/null 2>&1
+    print_message "UFW is not active. Enabling firewall automatically..."
     ufw --force enable > /dev/null 2>&1
+    print_message "Firewall enabled successfully."
 fi
 
-print_message "Firewall configured"
+# --- System Optimization for Redis ---
+print_message "Optimizing system for Redis performance (memory overcommit)..."
+echo "vm.overcommit_memory = 1" >> /etc/sysctl.conf
+sysctl -p > /dev/null 2>&1
 
-# Create directories
+# --- n8n Configuration ---
 print_message "Setting up n8n directory structure..."
-mkdir -p $N8N_DIR/{db_data,n8n_storage}
+mkdir -p $N8N_DIR/{db_data,n8n_storage,redis_data}
 mkdir -p $BACKUP_DIR
-
-# Fix permissions for n8n storage (n8n runs as user 1000)
 chown -R 1000:1000 $N8N_DIR/n8n_storage
-
 cd $N8N_DIR
 
-# Generate passwords
+print_message "Generating secure credentials..."
 POSTGRES_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
 POSTGRES_USER_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
 N8N_ENCRYPTION_KEY=$(openssl rand -hex 32)
+QUEUE_BULL_REDIS_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
 
-# Create .env with modern variables
+# Define these as shell variables for use in init-data.sh
+POSTGRES_DB="n8n"
+POSTGRES_NON_ROOT_USER="n8n_user"
+
+print_message "Creating configuration file (.env)..."
 cat > .env <<EOF
 # Database
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-POSTGRES_DB=n8n
-POSTGRES_NON_ROOT_USER=n8n_user
+POSTGRES_DB=${POSTGRES_DB}
+POSTGRES_NON_ROOT_USER=${POSTGRES_NON_ROOT_USER}
 POSTGRES_NON_ROOT_PASSWORD=${POSTGRES_USER_PASSWORD}
+POSTGRES_PORT=${POSTGRES_PORT}
 
 # n8n Core
 N8N_HOST=${DOMAIN}
@@ -164,36 +171,53 @@ N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
 GENERIC_TIMEZONE=UTC
 NODE_ENV=production
 
-# Security & Modern Features (n8n v1.70+)
+# Database Connection for n8n
+DB_TYPE=postgresdb
+DB_POSTGRESDB_HOST=postgres
+DB_POSTGRESDB_PORT=5432
+DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+DB_POSTGRESDB_USER=${POSTGRES_NON_ROOT_USER}
+DB_POSTGRESDB_PASSWORD=${POSTGRES_USER_PASSWORD}
+
+# Trust Proxy for Nginx
+N8N_TRUST_PROXY=true
+N8N_PROXY_HOPS=1
+
+# Execution mode - queue for scalability
+EXECUTIONS_MODE=queue
+QUEUE_WORKER_CONCURRENCY=5
+QUEUE_HEALTH_CHECK_ACTIVE=true
+
+# Prevent deprecation warnings
 N8N_RUNNERS_ENABLED=true
-N8N_BLOCK_ENV_ACCESS_IN_NODE=true
+OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS=true
+N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+
+# Redis Connection
+QUEUE_BULL_REDIS_HOST=redis
+QUEUE_BULL_REDIS_PORT=6379
+QUEUE_BULL_REDIS_DB=0
+QUEUE_BULL_REDIS_PASSWORD=${QUEUE_BULL_REDIS_PASSWORD}
+
+# Security Hardening
 N8N_SECURE_COOKIE=true
+N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
 
-# Execution mode - regular (simple mode without Redis)
-EXECUTIONS_MODE=regular
-
-# Data management - auto cleanup after 7 days
+# Performance & Data Management
 EXECUTIONS_DATA_PRUNE=true
 EXECUTIONS_DATA_MAX_AGE=168
 EXECUTIONS_DATA_PRUNE_MAX_COUNT=10000
-
-# Performance optimizations
 N8N_DEFAULT_BINARY_DATA_MODE=filesystem
 N8N_PAYLOAD_SIZE_MAX=100
-N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
-N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
-
-# Proxy settings
-N8N_PROXY_HOPS=1
 EOF
 
-# Create PostgreSQL init script
-cat > init-data.sh <<'EOF'
+# Create init script with variables substituted
+cat > init-data.sh <<EOF
 #!/bin/bash
 set -e
-if [ -n "${POSTGRES_NON_ROOT_USER:-}" ] && [ -n "${POSTGRES_NON_ROOT_PASSWORD:-}" ]; then
-    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
-        CREATE USER ${POSTGRES_NON_ROOT_USER} WITH PASSWORD '${POSTGRES_NON_ROOT_PASSWORD}';
+if [ -n "\${POSTGRES_NON_ROOT_USER:-}" ] && [ -n "\${POSTGRES_NON_ROOT_PASSWORD:-}" ]; then 
+    psql -v ON_ERROR_STOP=1 --username "\$POSTGRES_USER" --dbname "\$POSTGRES_DB" <<-EOSQL
+        CREATE USER ${POSTGRES_NON_ROOT_USER} WITH PASSWORD '${POSTGRES_USER_PASSWORD}';
         GRANT ALL PRIVILEGES ON DATABASE ${POSTGRES_DB} TO ${POSTGRES_NON_ROOT_USER};
         GRANT CREATE ON SCHEMA public TO ${POSTGRES_NON_ROOT_USER};
         ALTER DATABASE ${POSTGRES_DB} OWNER TO ${POSTGRES_NON_ROOT_USER};
@@ -202,12 +226,8 @@ fi
 EOF
 chmod +x init-data.sh
 
-# Create docker-compose.yml
-cat > docker-compose.yml <<EOF
-volumes:
-  db_data:
-  n8n_storage:
-
+print_message "Creating Docker Compose file..."
+cat > docker-compose.yml <<'EOF'
 networks:
   n8n_net:
     driver: bridge
@@ -217,19 +237,14 @@ services:
     image: postgres:15
     container_name: n8n-postgres
     restart: unless-stopped
-    environment:
-      - POSTGRES_USER=\${POSTGRES_USER}
-      - POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
-      - POSTGRES_DB=\${POSTGRES_DB}
-      - POSTGRES_NON_ROOT_USER=\${POSTGRES_NON_ROOT_USER}
-      - POSTGRES_NON_ROOT_PASSWORD=\${POSTGRES_NON_ROOT_PASSWORD}
+    env_file: .env
     volumes:
       - ./db_data:/var/lib/postgresql/data
       - ./init-data.sh:/docker-entrypoint-initdb.d/init-data.sh:ro
     ports:
       - "127.0.0.1:${POSTGRES_PORT}:5432"
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -h localhost -U \${POSTGRES_USER} -d \${POSTGRES_DB}']
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -241,35 +256,36 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  n8n:
-    image: n8nio/n8n:latest
-    container_name: n8n
+  redis:
+    image: redis:7-alpine
+    container_name: n8n-redis
     restart: unless-stopped
+    env_file: .env
+    command: sh -c 'redis-server --requirepass "$${QUEUE_BULL_REDIS_PASSWORD}"'
+    volumes:
+      - ./redis_data:/data
+    networks:
+      - n8n_net
+    healthcheck:
+      test: ["CMD", "sh", "-c", "redis-cli --no-auth-warning -a \"$${QUEUE_BULL_REDIS_PASSWORD}\" ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  n8n-main:
+    image: n8nio/n8n:latest
+    container_name: n8n-main
+    restart: unless-stopped
+    env_file: .env
     environment:
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_HOST=postgres
       - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=\${POSTGRES_DB}
-      - DB_POSTGRESDB_USER=\${POSTGRES_NON_ROOT_USER}
-      - DB_POSTGRESDB_PASSWORD=\${POSTGRES_NON_ROOT_PASSWORD}
-      - EXECUTIONS_MODE=\${EXECUTIONS_MODE}
-      - WEBHOOK_URL=\${WEBHOOK_URL}
-      - N8N_HOST=\${N8N_HOST}
-      - N8N_PROTOCOL=\${N8N_PROTOCOL}
-      - N8N_ENCRYPTION_KEY=\${N8N_ENCRYPTION_KEY}
-      - GENERIC_TIMEZONE=\${GENERIC_TIMEZONE}
-      - NODE_ENV=\${NODE_ENV}
-      - EXECUTIONS_DATA_PRUNE=\${EXECUTIONS_DATA_PRUNE}
-      - EXECUTIONS_DATA_MAX_AGE=\${EXECUTIONS_DATA_MAX_AGE}
-      - EXECUTIONS_DATA_PRUNE_MAX_COUNT=\${EXECUTIONS_DATA_PRUNE_MAX_COUNT}
-      - N8N_DEFAULT_BINARY_DATA_MODE=\${N8N_DEFAULT_BINARY_DATA_MODE}
-      - N8N_PAYLOAD_SIZE_MAX=\${N8N_PAYLOAD_SIZE_MAX}
-      - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=\${N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE}
-      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=\${N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS}
-      - N8N_PROXY_HOPS=\${N8N_PROXY_HOPS}
-      - N8N_RUNNERS_ENABLED=\${N8N_RUNNERS_ENABLED}
-      - N8N_BLOCK_ENV_ACCESS_IN_NODE=\${N8N_BLOCK_ENV_ACCESS_IN_NODE}
-      - N8N_SECURE_COOKIE=\${N8N_SECURE_COOKIE}
     ports:
       - "127.0.0.1:${N8N_PORT}:5678"
     volumes:
@@ -277,12 +293,39 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - n8n_net
     healthcheck:
       test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:5678/healthz']
       interval: 10s
       timeout: 5s
-      retries: 12
-      start_period: 30s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  n8n-worker:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    # FIXED: Properly pass concurrency from .env variable
+    command: worker --concurrency=${QUEUE_WORKER_CONCURRENCY:-5}
+    env_file: .env
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - EXECUTIONS_MODE=queue
+    volumes:
+      - ./n8n_storage:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - n8n_net
     logging:
@@ -292,437 +335,391 @@ services:
         max-file: "3"
 EOF
 
-# === ROBUST SSL ACQUISITION (Phase 1) ===
-print_message "Creating webroot for SSL certificate validation..."
+# --- Nginx and SSL ---
+print_message "Configuring Nginx for SSL challenge..."
 mkdir -p "/var/www/${DOMAIN}/.well-known/acme-challenge"
 chown www-data:www-data "/var/www/${DOMAIN}" -R
 
-print_message "Configuring temporary Nginx for SSL challenge..."
 cat > "/etc/nginx/sites-available/${DOMAIN}" << EOF
-server {
-    listen 80;
-    server_name ${DOMAIN};
-    
-    location /.well-known/acme-challenge/ {
-        root /var/www/${DOMAIN};
-    }
-    
-    location / {
-        return 404; # Temporarily block other requests
-    }
+server { 
+    listen 80; 
+    server_name ${DOMAIN}; 
+    location /.well-known/acme-challenge/ { 
+        root /var/www/${DOMAIN}; 
+    } 
+    location / { 
+        return 404; 
+    } 
 }
 EOF
 
 ln -sf "/etc/nginx/sites-available/${DOMAIN}" "/etc/nginx/sites-enabled/"
 rm -f /etc/nginx/sites-enabled/default
-nginx -t > /dev/null 2>&1
 systemctl restart nginx
 
-print_message "Obtaining SSL certificate via webroot..."
-if ! certbot certonly --webroot -w "/var/www/${DOMAIN}" -d "${DOMAIN}" --non-interactive --agree-tos -m "${EMAIL}"; then
-    print_error "Certbot failed. Please check your DNS A record points to this server's IP."
-    print_error "Server IP: $SERVER_IP"
+check_dns_resolution "${DOMAIN}"
+
+print_message "Obtaining SSL certificate from Let's Encrypt..."
+if ! certbot certonly --webroot -w "/var/www/${DOMAIN}" -d "${DOMAIN}" --non-interactive --agree-tos -m "${EMAIL}" --deploy-hook "systemctl reload nginx"; then
+    print_error "Certbot failed. Please check that your DNS A record for '${DOMAIN}' points to this server."
     exit 1
 fi
-print_message "SSL certificate obtained successfully."
 
-# Create stronger SSL security files
-if [ ! -f "/etc/letsencrypt/options-ssl-nginx.conf" ]; then
+print_message "Creating stronger SSL security parameters..."
+if [ ! -f "/etc/letsencrypt/options-ssl-nginx.conf" ]; then 
     wget -O /etc/letsencrypt/options-ssl-nginx.conf https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf > /dev/null 2>&1
 fi
-if [ ! -f "/etc/letsencrypt/ssl-dhparams.pem" ]; then
+if [ ! -f "/etc/letsencrypt/ssl-dhparams.pem" ]; then 
     openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048 > /dev/null 2>&1
 fi
 
-# === FINAL NGINX CONFIGURATION (Phase 2) ===
 print_message "Configuring final Nginx production setup..."
 cat > "/etc/nginx/sites-available/${DOMAIN}" <<EOF
-# Rate limiting
-limit_req_zone \$binary_remote_addr zone=n8n_limit:10m rate=50r/s;
+# Rate limiting with reasonable limits
+limit_req_zone \$binary_remote_addr zone=n8n_limit:10m rate=100r/s;
 
-# WebSocket upgrade map
-map \$http_upgrade \$connection_upgrade {
-    default upgrade;
-    ''      close;
+map \$http_upgrade \$connection_upgrade { 
+    default upgrade; 
+    '' close; 
+}
+
+server { 
+    listen 80; 
+    server_name ${DOMAIN}; 
+    location / { 
+        return 301 https://\$host\$request_uri; 
+    } 
 }
 
 server {
-    listen 80;
+    listen 443 ssl http2; 
     server_name ${DOMAIN};
     
-    location /.well-known/acme-challenge/ {
-        root /var/www/${DOMAIN};
-    }
-    
-    location / {
-        return 301 https://\$host\$request_uri;
-    }
-}
-
-server {
-    listen 443 ssl http2;
-    server_name ${DOMAIN};
-    
-    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem; 
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
+    include /etc/letsencrypt/options-ssl-nginx.conf; 
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-
+    
     client_max_body_size 100M;
     
-    # Location for static assets - FIX for CSS/JS loading issues
-    location ~* \.(css|js|jpg|jpeg|gif|png|ico|svg|woff|woff2|ttf|eot)\$ {
-        proxy_pass http://127.0.0.1:${N8N_PORT};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header Accept-Encoding gzip;
-        
-        # Caching for static files
-        expires 30d;
-        add_header Cache-Control "public, immutable";
-        proxy_buffering on;
-    }
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options SAMEORIGIN;
+    add_header X-Content-Type-Options nosniff;
+    add_header Referrer-Policy strict-origin-when-cross-origin;
     
-    # Location for webhooks and SSE (long timeouts)
-    location ~ ^/(webhook|rest/sse) {
-        # Rate limiting
-        limit_req zone=n8n_limit burst=100 nodelay;
-        
-        # Proxy settings
+    # Dedicated block for WebSocket push (real-time UI updates) - no rate limiting, long timeouts
+    location ^~ /rest/push {
         proxy_pass http://127.0.0.1:${N8N_PORT};
         proxy_http_version 1.1;
-        
-        # Headers
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        
-        # WebSocket support
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection \$connection_upgrade;
-        
-        # Long timeouts for webhooks and SSE
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 3600;
         proxy_connect_timeout 3600;
         proxy_send_timeout 3600;
-        proxy_read_timeout 3600;
-        keepalive_timeout 3600;
-        
-        # Disable buffering for SSE
         proxy_buffering off;
-        proxy_cache off;
+        proxy_ignore_client_abort on;
     }
-    
-    # Location for UI and regular API (optimized for first load)
-    location / {
-        # Rate limiting
-        limit_req zone=n8n_limit burst=100 nodelay;
-        
-        # Proxy settings
+
+    # Binary data (enhanced for stable viewing/download)
+    location ^~ /rest/binary-data {
+        limit_req zone=n8n_limit burst=200 nodelay;
         proxy_pass http://127.0.0.1:${N8N_PORT};
         proxy_http_version 1.1;
-        
-        # Headers
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        
-        # WebSocket support
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        
-        # Increased timeouts to prevent CSS loading errors
-        proxy_connect_timeout 30;
-        proxy_send_timeout 300;
-        proxy_read_timeout 300;
-        keepalive_timeout 300;
-        
-        # Disable buffering for better first-load experience
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 3600;
+        proxy_send_timeout 3600;
         proxy_buffering off;
         proxy_request_buffering off;
+        proxy_ignore_client_abort on;
     }
     
-    # Health check endpoint
-    location /healthz {
-        access_log off;
-        proxy_pass http://127.0.0.1:${N8N_PORT}/healthz;
+    # Static files without rate limiting
+    location ~ \.(css|js|jpg|jpeg|gif|png|ico|svg|woff|woff2|ttf|eot|map)$ {
+        proxy_pass http://127.0.0.1:${N8N_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        expires 7d;
+        add_header Cache-Control "public, immutable";
+    }
+    
+    # API endpoints with higher rate limit
+    location ~ ^/(webhook|rest|api) {
+        limit_req zone=n8n_limit burst=200 nodelay;
+        proxy_pass http://127.0.0.1:${N8N_PORT}; 
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade; 
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_set_header Host \$host; 
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; 
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 3600; 
+        proxy_send_timeout 3600;
+        proxy_buffering off;
+    }
+    
+    # Main location with moderate rate limit
+    location / {
+        limit_req zone=n8n_limit burst=100 nodelay;
+        proxy_pass http://127.0.0.1:${N8N_PORT}; 
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade; 
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_set_header Host \$host; 
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; 
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 300; 
+        proxy_send_timeout 300;
+        proxy_buffering off;
     }
 }
 EOF
-
-nginx -t > /dev/null 2>&1
 systemctl reload nginx
 
-# Start n8n
-print_message "Starting n8n..."
-docker compose down > /dev/null 2>&1 || true
-docker compose up -d
+# --- Start Services ---
+print_message "Starting n8n services..."
+docker compose up -d --scale n8n-worker=1
 
-print_message "Waiting for services to start..."
-MAX_WAIT=180  # 3 minutes
-WAIT_INTERVAL=5
+print_message "Waiting for database initialization (this may take 30-60 seconds on first run)..."
+sleep 20
+
+# Check for specific table
+MAX_WAIT=120
 ELAPSED=0
+TABLE_COUNT=0
+DB_INITIALIZED=false
 
 while [ $ELAPSED -lt $MAX_WAIT ]; do
-    if curl -s -f -o /dev/null "http://127.0.0.1:${N8N_PORT}/healthz"; then
-        print_message "n8n is healthy and ready!"
+    TABLE_EXISTS=$(docker exec n8n-postgres psql -U ${POSTGRES_NON_ROOT_USER} -d ${POSTGRES_DB} -t -c \
+        "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='workflow_entity';" 2>/dev/null | xargs || echo "0")
+    
+    if [ "$TABLE_EXISTS" = "1" ]; then
+        TABLE_COUNT=$(docker exec n8n-postgres psql -U ${POSTGRES_NON_ROOT_USER} -d ${POSTGRES_DB} -t -c \
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null | xargs || echo "0")
+        print_message "Database initialized successfully with $TABLE_COUNT tables!"
+        DB_INITIALIZED=true
         break
     fi
     
     echo -n "."
-    sleep $WAIT_INTERVAL
-    ELAPSED=$((ELAPSED + WAIT_INTERVAL))
+    sleep 5
+    ELAPSED=$((ELAPSED + 5))
 done
 
-echo ""
-
-if [ $ELAPSED -ge $MAX_WAIT ]; then
-    print_error "n8n failed to start within 3 minutes"
-    echo "Showing recent logs:"
-    docker compose logs --tail=50
+if [ "$DB_INITIALIZED" = "false" ]; then
+    print_error "Database initialization failed after ${MAX_WAIT} seconds"
+    print_error "Check logs with: docker compose logs"
     exit 1
 fi
 
-# FIXED: Improved service check with compatibility fallback
-print_message "Verifying service status..."
-sleep 1  # Give Docker API a moment to stabilize
+# Wait for all services to be healthy
+print_message "Waiting for all services to become healthy..."
+ELAPSED=0
+MAX_WAIT=60
 
-# Try modern method first
-if docker compose ps --status=running 2>/dev/null | head -n1 > /dev/null; then
-    # New Docker Compose with --status support
-    HEALTHY_SERVICES=$(docker compose ps --status=running -q 2>/dev/null | wc -l)
-    if [ "$HEALTHY_SERVICES" -eq 2 ]; then
-        print_message "All services started successfully (${HEALTHY_SERVICES}/2 running)"
-    else
-        print_error "Service check failed. Expected 2 healthy services, found ${HEALTHY_SERVICES}"
-        docker compose ps
-        docker compose logs --tail=50
-        exit 1
+while [ $ELAPSED -lt $MAX_WAIT ]; do
+    POSTGRES_HEALTHY=$(docker inspect -f '{{.State.Health.Status}}' n8n-postgres 2>/dev/null || echo "unhealthy")
+    REDIS_HEALTHY=$(docker inspect -f '{{.State.Health.Status}}' n8n-redis 2>/dev/null || echo "unhealthy")
+    MAIN_HEALTHY=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:${N8N_PORT}/healthz 2>/dev/null || echo "000")
+
+    if [ "$POSTGRES_HEALTHY" = "healthy" ] && [ "$REDIS_HEALTHY" = "healthy" ] && [ "$MAIN_HEALTHY" = "200" ]; then
+        print_message "All services are healthy and running!"
+        break
     fi
-else
-    # Fallback for older Docker Compose versions
-    print_message "Using legacy service check method..."
-    N8N_RUNNING=$(docker inspect -f '{{.State.Running}}' n8n 2>/dev/null || echo "false")
-    PG_RUNNING=$(docker inspect -f '{{.State.Running}}' n8n-postgres 2>/dev/null || echo "false")
     
-    if [ "$N8N_RUNNING" = "true" ] && [ "$PG_RUNNING" = "true" ]; then
-        print_message "All services started successfully"
-    else
-        print_error "Service check failed"
-        print_error "n8n status: $N8N_RUNNING"
-        print_error "PostgreSQL status: $PG_RUNNING"
-        docker compose ps
-        docker compose logs --tail=50
-        exit 1
-    fi
+    echo -n "."
+    sleep 5
+    ELAPSED=$((ELAPSED + 5))
+done
+
+if [ $ELAPSED -ge $MAX_WAIT ]; then
+    print_error "Services failed to become healthy after ${MAX_WAIT} seconds"
+    print_error "Check logs with: docker compose logs --tail=50"
+    exit 1
 fi
 
-# Create backup script
+# --- Auxiliary Scripts ---
+print_message "Creating helper scripts (backup, restore, worker manager)..."
+
 cat > ${BACKUP_DIR}/backup.sh <<'EOF'
 #!/bin/bash
-# n8n Local Backup Script
-
 BACKUP_DIR="/opt/backups/n8n"
 DATE=$(date +%Y%m%d_%H%M%S)
-
-echo "[$(date)] Starting backup..."
-
-# Create backup directory if not exists
 mkdir -p $BACKUP_DIR
-
-# Backup database
 docker exec n8n-postgres pg_dump -U postgres n8n | gzip > $BACKUP_DIR/db_${DATE}.sql.gz
-echo "[$(date)] Database backed up"
-
-# Backup n8n files (workflows, credentials, settings)
-tar -czf $BACKUP_DIR/files_${DATE}.tar.gz \
-    /opt/n8n/docker-compose.yml \
-    /opt/n8n/.env \
-    /opt/n8n/n8n_storage \
-    2>/dev/null
-echo "[$(date)] Files backed up"
-
-# Remove backups older than 14 days
+tar -czf $BACKUP_DIR/files_${DATE}.tar.gz -C /opt/n8n .env docker-compose.yml init-data.sh n8n_storage 2>/dev/null
 find $BACKUP_DIR -name "*.gz" -mtime +14 -delete
-echo "[$(date)] Old backups cleaned"
-
-# Show backup sizes
-echo "[$(date)] Current backups:"
-ls -lh $BACKUP_DIR | tail -n 5
-
-echo "[$(date)] Backup completed successfully"
+echo "Backup completed: db_${DATE}.sql.gz and files_${DATE}.tar.gz"
 EOF
 chmod +x ${BACKUP_DIR}/backup.sh
 
-# Create maintenance script
-cat > ${N8N_DIR}/maintenance.sh <<'EOF'
-#!/bin/bash
-# Weekly maintenance script
-
-echo "[$(date)] Starting maintenance..."
-
-# Clean docker images
-docker image prune -a -f
-
-# Clean docker volumes
-docker volume prune -f
-
-# Vacuum journal logs
-journalctl --vacuum-time=10d --vacuum-size=500M
-
-echo "[$(date)] Maintenance completed"
-EOF
-chmod +x ${N8N_DIR}/maintenance.sh
-
-# Setup cron jobs
-print_message "Setting up automated tasks..."
-
-# Remove existing n8n related cron jobs and add new ones
-(crontab -l 2>/dev/null || echo "") | grep -v "${BACKUP_DIR}/backup.sh" | grep -v "${N8N_DIR}/maintenance.sh" > /tmp/crontab.tmp || true
-
-# Add new cron jobs - using single quotes to prevent glob expansion
-echo '0 3 * * * '"${BACKUP_DIR}/backup.sh"' >> '"${BACKUP_DIR}/backup.log"' 2>&1' >> /tmp/crontab.tmp
-echo '0 4 * * 0 '"${N8N_DIR}/maintenance.sh"' >> '"${N8N_DIR}/maintenance.log"' 2>&1' >> /tmp/crontab.tmp
-
-# Install new crontab
-crontab /tmp/crontab.tmp
-rm -f /tmp/crontab.tmp
-
-# Create safe restore script
 cat > ${BACKUP_DIR}/restore.sh <<'EOF'
 #!/bin/bash
-# n8n Safe Restore Script
-
-if [ $# -eq 0 ]; then
-    echo "Usage: $0 <backup_date>"
-    echo "Example: $0 20240314_030000"
-    echo ""
-    echo "Available backups:"
-    ls -lh /opt/backups/n8n/*.gz
-    exit 1
-fi
-
 DATE=$1
-BACKUP_DIR="/opt/backups/n8n"
-TEMP_DIR="/tmp/n8n-restore-$$"
-
-echo "Restoring from backup: ${DATE}"
-read -p "This will overwrite current data. Continue? (y/n) " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+if [ -z "$DATE" ]; then 
+    echo "Usage: $0 <backup_date>"
+    echo "Available backups:"
+    ls -la /opt/backups/n8n/ | grep -E "(db_|files_)" | awk '{print $9}'
     exit 1
 fi
 
-# Verify backup files exist
-if [ ! -f "${BACKUP_DIR}/db_${DATE}.sql.gz" ] || [ ! -f "${BACKUP_DIR}/files_${DATE}.tar.gz" ]; then
-    echo "Error: Backup files not found for date ${DATE}"
-    exit 1
-fi
+cd /opt/n8n && docker compose down
+tar -xzf /opt/backups/n8n/files_${DATE}.tar.gz -C /opt/n8n
+chown -R 1000:1000 /opt/n8n/n8n_storage
+source /opt/n8n/.env
 
-# Stop services
-cd /opt/n8n
-docker compose down
-
-# Create temporary directory
-mkdir -p ${TEMP_DIR}
-
-# Extract files to temporary directory
-echo "Extracting backup to temporary directory..."
-tar -xzf ${BACKUP_DIR}/files_${DATE}.tar.gz -C ${TEMP_DIR}
-
-# Restore specific files
-echo "Restoring configuration and data..."
-if [ -f "${TEMP_DIR}/opt/n8n/.env" ]; then
-    cp -a "${TEMP_DIR}/opt/n8n/.env" /opt/n8n/.env
-fi
-
-if [ -d "${TEMP_DIR}/opt/n8n/n8n_storage" ]; then
-    rm -rf /opt/n8n/n8n_storage
-    cp -a "${TEMP_DIR}/opt/n8n/n8n_storage" /opt/n8n/
-    # Fix permissions for n8n container (runs as UID 1000)
-    chown -R 1000:1000 /opt/n8n/n8n_storage
-fi
-
-# Clean up temporary directory
-rm -rf ${TEMP_DIR}
-
-# Start PostgreSQL only
+echo "Starting PostgreSQL..."
 docker compose up -d postgres
-sleep 10
 
-# Restore database
-echo "Restoring database..."
-gunzip < ${BACKUP_DIR}/db_${DATE}.sql.gz | docker exec -i n8n-postgres psql -U postgres n8n
+echo "Waiting for PostgreSQL to become healthy..."
+until [ "$(docker inspect -f '{{.State.Health.Status}}' n8n-postgres 2>/dev/null)" = "healthy" ]; do
+    echo -n "."
+    sleep 2
+done
+echo " PostgreSQL is healthy!"
 
-# Start all services
-docker compose up -d
+echo "Restoring database from dump..."
+gunzip < /opt/backups/n8n/db_${DATE}.sql.gz | docker exec -i n8n-postgres psql -U postgres n8n
 
-echo "Restore completed"
-echo "Services are starting up. Check status with: docker compose ps"
+echo "Starting all services..."
+docker compose up -d --scale n8n-worker=1
+
+echo "Restore completed."
 EOF
 chmod +x ${BACKUP_DIR}/restore.sh
 
-# Final message
+cat > ${N8N_DIR}/manage-workers.sh <<'EOF'
+#!/bin/bash
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+cd /opt/n8n || { echo -e "${RED}Error: Directory /opt/n8n not found.${NC}"; exit 1; }
+
+get_current_workers() {
+    docker compose ps n8n-worker 2>/dev/null | tail -n +2 | wc -l
+}
+
+echo -e "${GREEN}========================================${NC}"
+echo -e "${YELLOW}      n8n Worker Manager${NC}"
+echo -e "${GREEN}========================================${NC}\n"
+
+CURRENT_WORKERS=$(get_current_workers)
+echo -e "Current number of running workers: ${GREEN}${CURRENT_WORKERS}${NC}"
+
+# Get current concurrency setting
+CONCURRENCY=$(grep QUEUE_WORKER_CONCURRENCY /opt/n8n/.env | cut -d'=' -f2 || echo "5")
+echo -e "Each worker handles up to ${GREEN}${CONCURRENCY}${NC} concurrent jobs\n"
+
+while true; do
+    read -p "Select: [1] Add worker, [2] Remove worker, [3] Change concurrency, [q] Quit: " choice
+    echo ""
+    case $choice in
+        1)
+            NEW_COUNT=$((CURRENT_WORKERS + 1))
+            echo -e "Adding worker... Setting total to: ${GREEN}${NEW_COUNT}${NC}"
+            docker compose up -d --scale n8n-worker=${NEW_COUNT}
+            echo -e "\n${GREEN}✔ Done!${NC}"
+            break
+            ;;
+        2)
+            if [ "$CURRENT_WORKERS" -le 1 ]; then 
+                echo -e "${RED}Error: Cannot remove the last worker.${NC}"
+                exit 1
+            fi
+            NEW_COUNT=$((CURRENT_WORKERS - 1))
+            echo -e "Removing worker... Setting total to: ${GREEN}${NEW_COUNT}${NC}"
+            docker compose up -d --scale n8n-worker=${NEW_COUNT}
+            echo -e "\n${GREEN}✔ Done!${NC}"
+            break
+            ;;
+        3)
+            read -p "Enter new concurrency value (current: $CONCURRENCY): " NEW_CONC
+            if [[ "$NEW_CONC" =~ ^[0-9]+$ ]] && [ "$NEW_CONC" -ge 1 ] && [ "$NEW_CONC" -le 20 ]; then
+                sed -i "s/QUEUE_WORKER_CONCURRENCY=.*/QUEUE_WORKER_CONCURRENCY=$NEW_CONC/" /opt/n8n/.env
+                echo -e "${GREEN}Concurrency updated to $NEW_CONC. Restarting workers...${NC}"
+                docker compose restart n8n-worker
+                echo -e "\n${GREEN}✔ Done!${NC}"
+            else
+                echo -e "${RED}Invalid value. Must be between 1-20.${NC}"
+            fi
+            break
+            ;;
+        [qQ])
+            echo "Exiting without changes."
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Invalid choice.${NC}"
+            ;;
+    esac
+done
+
+echo -e "\nChecking status..."
+sleep 2
+docker compose ps
+EOF
+chmod +x ${N8N_DIR}/manage-workers.sh
+
+# --- Cron Jobs ---
+print_message "Setting up cron jobs for backup and maintenance..."
+
+CRON_BACKUP_JOB="0 3 * * * ${BACKUP_DIR}/backup.sh > /var/log/n8n_backup.log 2>&1"
+CRON_PRUNE_JOB="0 4 * * 0 docker system prune -af > /var/log/docker_prune.log 2>&1"
+CRON_CERT_RENEW_JOB="0 2 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'"
+
+CRON_TEMP=$(mktemp /tmp/cron.XXXXXX)
+(crontab -l 2>/dev/null | grep -vE "n8n_backup|docker_prune|certbot") > "$CRON_TEMP" || true
+echo "$CRON_BACKUP_JOB" >> "$CRON_TEMP"
+echo "$CRON_PRUNE_JOB" >> "$CRON_TEMP"
+echo "$CRON_CERT_RENEW_JOB" >> "$CRON_TEMP"
+crontab "$CRON_TEMP"
+rm -f "$CRON_TEMP"
+
+# --- Final Message ---
 echo ""
 echo "=========================================="
 echo -e "${GREEN}   Installation Completed!${NC}"
 echo "=========================================="
 echo ""
-echo -e "${GREEN}✓ n8n is ready at: https://${DOMAIN}${NC}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo -e "${YELLOW}           NEXT STEPS${NC}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  1. Visit https://${DOMAIN} to create your admin account"
+echo "  2. Review your credentials in ${N8N_DIR}/.env"
+echo "  3. Use the worker manager to adjust performance:"
+echo -e "     ${GREEN}bash ${N8N_DIR}/manage-workers.sh${NC}"
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "DATABASE STATUS:"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  PostgreSQL Tables: ${TABLE_COUNT:-0}"
+echo "  Expected: 40+ tables for successful initialization"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "FEATURES ENABLED:"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  ✓ PostgreSQL database on port ${POSTGRES_PORT}"
-echo "  ✓ Daily automated backups at 3:00 AM"
-echo "  ✓ Weekly maintenance at 4:00 AM Sunday"
-echo "  ✓ Log rotation (max 30MB)"
-echo "  ✓ Auto-cleanup executions > 7 days"
-echo "  ✓ Task Runners enabled (modern security)"
-echo "  ✓ Environment variables blocked in Code nodes"
-echo "  ✓ Secure cookies for HTTPS"
-echo "  ✓ Optimized nginx configuration:"
-echo "    • Webhooks/SSE: 1-hour timeout"
-echo "    • UI/API: 120-second timeout"
-echo "    • Static files: Cached properly"
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "IMPORTANT PATHS:"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  n8n Directory: ${N8N_DIR}"
-echo "  Config File: ${N8N_DIR}/.env"
-echo "  Workflows/Data: ${N8N_DIR}/n8n_storage"
-echo "  Backup Directory: ${BACKUP_DIR}"
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "MANAGEMENT COMMANDS:"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  View logs:       cd ${N8N_DIR} && docker compose logs -f"
-echo "  Restart:         cd ${N8N_DIR} && docker compose restart"
-echo "  Stop:            cd ${N8N_DIR} && docker compose down"
-echo "  Status:          cd ${N8N_DIR} && docker compose ps"
-echo "  Check health:    curl http://localhost:${N8N_PORT}/healthz"
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "BACKUP & RESTORE:"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Manual backup:   ${BACKUP_DIR}/backup.sh"
-echo "  Restore:         ${BACKUP_DIR}/restore.sh <date>"
-echo "  View backups:    ls -lh ${BACKUP_DIR}/*.gz"
-echo "  Backup retention: 14 days"
-echo "  Execution retention: 7 days"
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "NEXT STEPS:"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  1. Visit https://${DOMAIN}"
-echo "  2. Create your admin account"
-echo "  3. Test a simple workflow"
-echo "  4. Configure email settings (optional)"
-echo ""
-echo -e "${GREEN}✓ Database credentials are stored in: ${N8N_DIR}/.env${NC}"
+echo "  ✓ Production Queue Mode with Redis 7"
+echo "  ✓ PostgreSQL database (not SQLite)"
+echo "  ✓ Default: 1 worker × 5 jobs = 5 concurrent executions"
+echo "  ✓ Automatic daily backups at 3 AM"
+echo "  ✓ Automatic SSL renewal"
+echo "  ✓ PostgreSQL on port ${POSTGRES_PORT}"
+echo "  ✓ Worker concurrency properly configured"
+echo "  ✓ Trust proxy properly configured"
+echo "  ✓ Binary data preview fixed"
 echo ""
