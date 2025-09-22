@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# n8n Installer v3.22 - Production Grade Edition (Fixed Binary Preview & Trust Proxy)
+# n8n Installer v3.22 - Production Grade Edition 
 # For Ubuntu 20.04, 22.04, 24.04
 
 set -euo pipefail
@@ -11,11 +11,58 @@ BACKUP_DIR="/opt/backups/n8n"
 POSTGRES_PORT=5433
 N8N_PORT=5678
 
-# --- Colors and Functions ---
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-print_message() { echo -e "${GREEN}[INFO]${NC} $1"; }
-print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
-print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+# --- Colors and Styles ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+# --- Unicode symbols ---
+CHECK="✓"
+CROSS="✗"
+ARROW="➜"
+DOT="•"
+STAR="★"
+GEAR="⚙"
+ROCKET="🚀"
+SHIELD="🛡"
+DATABASE="🗄"
+CLOCK="⏰"
+WARNING="⚠"
+INFO="ℹ"
+
+# --- Functions ---
+print_message() { echo -e "${CYAN}${INFO}${NC} ${WHITE}$1${NC}"; }
+print_success() { echo -e "${GREEN}${CHECK}${NC} ${GREEN}$1${NC}"; }
+print_error() { echo -e "${RED}${CROSS}${NC} ${RED}$1${NC}"; }
+print_warning() { echo -e "${YELLOW}${WARNING}${NC} ${YELLOW}$1${NC}"; }
+print_step() { echo -e "\n${PURPLE}${ARROW}${NC} ${BOLD}$1${NC}"; }
+
+# --- ASCII Art Header ---
+show_header() {
+    clear
+    echo -e "${CYAN}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "        ███╗   ██╗ █████╗ ███╗   ██╗"
+    echo "        ████╗  ██║██╔══██╗████╗  ██║"
+    echo "        ██╔██╗ ██║╚█████╔╝██╔██╗ ██║"
+    echo "        ██║╚██╗██║██╔══██╗██║╚██╗██║"
+    echo "        ██║ ╚████║╚█████╔╝██║ ╚████║"
+    echo "        ╚═╝  ╚═══╝ ╚════╝ ╚═╝  ╚═══╝"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo -e "${NC}"
+    echo -e "${BOLD}${WHITE}    Automated Workflow Platform Installer${NC}"
+    echo -e "${DIM}    Version 3.22 - Production Grade Edition${NC}"
+    echo ""
+}
 
 # --- Port Check Function ---
 check_port_availability() {
@@ -26,7 +73,7 @@ check_port_availability() {
         print_warning "Please free the port or modify the configuration"
         exit 1
     fi
-    print_message "Port ${port} is available for ${service}"
+    print_success "Port ${port} is available for ${service}"
 }
 
 # --- DNS Check Function ---
@@ -50,93 +97,157 @@ check_dns_resolution() {
                       hostname -I | awk '{print $1}' || \
                       echo "unknown")
     
-    print_message "Domain ${domain} resolves to: $(echo $dns_ips | tr '\n' ' ')"
+    print_success "Domain ${domain} resolves to: $(echo $dns_ips | tr '\n' ' ')"
     
     if [ "$server_ip" != "unknown" ] && ! echo "$dns_ips" | grep -q "$server_ip"; then
         print_warning "Domain doesn't resolve to this server's IP ($server_ip)"
-        read -p "Do you want to continue anyway? (y/n): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            exit 1
-        fi
+        print_warning "Continuing with installation..."
     fi
 }
 
-# --- Initial Checks ---
-if [[ $EUID -ne 0 ]]; then print_error "This script must be run as root."; exit 1; fi
-if ! grep -q "Ubuntu" /etc/os-release; then print_error "This script is for Ubuntu only."; exit 1; fi
+# --- System Requirements Check ---
+check_system_requirements() {
+    echo -e "\n${BOLD}${WHITE}System Requirements Check${NC}"
+    echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+    
+    # Check CPU cores
+    local cpu_cores=$(nproc)
+    if [ "$cpu_cores" -ge 1 ]; then
+        print_success "CPU Cores: $cpu_cores ${DIM}(minimum: 1)${NC}"
+    else
+        print_warning "CPU cores: $cpu_cores ${DIM}(minimum: 1)${NC}"
+    fi
+    
+    # Check RAM
+    local total_ram=$(free -m | awk 'NR==2{print $2}')
+    local ram_gb=$(echo "scale=1; $total_ram/1024" | bc 2>/dev/null || echo "2.0")
+    if [ "$total_ram" -ge 2000 ]; then
+        print_success "RAM: ${ram_gb}GB ${DIM}(minimum: 2GB)${NC}"
+    else
+        print_warning "RAM: ${ram_gb}GB ${DIM}(minimum: 2GB)${NC}"
+        print_warning "n8n may experience performance issues with less than 2GB RAM"
+    fi
+    
+    # Check available disk space
+    local available_space=$(df -BG /opt 2>/dev/null | awk 'NR==2 {print $4}' | sed 's/G//')
+    if [ "$available_space" -ge 10 ]; then
+        print_success "Available disk space: ${available_space}GB ${DIM}(minimum: 10GB)${NC}"
+    else
+        print_warning "Low disk space: ${available_space}GB ${DIM}(minimum: 10GB)${NC}"
+    fi
+    
+    echo ""
+}
 
-if [ -d "${N8N_DIR}" ]; then
-    print_error "Installation directory ${N8N_DIR} already exists."
-    print_warning "To reinstall, please first:"
-    print_warning "1. Backup your data: ${BACKUP_DIR}/backup.sh"
-    print_warning "2. Remove the directory: sudo rm -rf ${N8N_DIR}"
+# --- Initial Checks ---
+if [[ $EUID -ne 0 ]]; then 
+    show_header
+    print_error "This script must be run as root."
+    echo -e "${DIM}Please run: sudo bash $0${NC}"
     exit 1
 fi
 
-clear
-echo "=========================================="
-echo "   n8n Installer v3.22 (Production Grade)"
-echo "=========================================="
-echo ""
-echo "Features:"
-echo "  ✓ Queue Mode with Redis 7 for high performance"
-echo "  ✓ PostgreSQL database (properly initialized)"
-echo "  ✓ Automatic daily backups"
-echo "  ✓ Worker management script for easy scaling"
-echo "  ✓ Fixed CSS/JS loading issues"
-echo "  ✓ Fixed worker concurrency configuration"
-echo "  ✓ Proper trust proxy configuration"
-echo "  ✓ Automatic SSL renewal"
-echo "  ✓ Fixed binary data preview (text files)"
+if ! grep -q "Ubuntu" /etc/os-release; then 
+    show_header
+    print_error "This script is for Ubuntu only."
+    exit 1
+fi
+
+if [ -d "${N8N_DIR}" ]; then
+    show_header
+    print_error "Installation directory ${N8N_DIR} already exists."
+    print_warning "To reinstall, please first:"
+    echo -e "  ${DIM}1. Backup your data: ${BACKUP_DIR}/backup.sh${NC}"
+    echo -e "  ${DIM}2. Remove the directory: sudo rm -rf ${N8N_DIR}${NC}"
+    exit 1
+fi
+
+# --- Welcome Screen ---
+show_header
+
+echo -e "${BOLD}${WHITE}${ROCKET} Welcome to n8n Production Installer${NC}"
+echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+
+echo -e "${BOLD}${GREEN}Features:${NC}"
+echo -e "  ${GREEN}${CHECK}${NC} Queue Mode with Redis 7 for high performance"
+echo -e "  ${GREEN}${CHECK}${NC} PostgreSQL database (properly initialized)"
+echo -e "  ${GREEN}${CHECK}${NC} Automatic daily backups"
+echo -e "  ${GREEN}${CHECK}${NC} Worker management script for easy scaling"
+echo -e "  ${GREEN}${CHECK}${NC} Fixed CSS/JS loading issues"
+echo -e "  ${GREEN}${CHECK}${NC} Fixed worker concurrency configuration"
+echo -e "  ${GREEN}${CHECK}${NC} Proper trust proxy configuration"
+echo -e "  ${GREEN}${CHECK}${NC} Automatic SSL renewal"
+echo -e "  ${GREEN}${CHECK}${NC} Fixed binary data preview (text files)"
 echo ""
 
+echo -e "${BOLD}${YELLOW}${WARNING} Minimum Requirements:${NC}"
+echo -e "  ${DOT} CPU: 1 core"
+echo -e "  ${DOT} RAM: 2GB"
+echo -e "  ${DOT} Storage: 10GB"
+echo -e "  ${DOT} OS: Ubuntu 20.04/22.04/24.04 LTS"
+echo ""
+
+# System requirements check
+check_system_requirements
+
 # --- User Input ---
-read -p "Enter your domain name (e.g., n8n.example.com): " DOMAIN
-read -p "Enter your email address (for SSL certificates): " EMAIL
+echo -e "${BOLD}${WHITE}Configuration${NC}"
+echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+
+echo -ne "${CYAN}${ARROW}${NC} Enter your domain name (e.g., n8n.example.com): "
+read DOMAIN
+echo -ne "${CYAN}${ARROW}${NC} Enter your email address (for SSL certificates): "
+read EMAIL
 echo ""
 
 # --- Port Availability Checks ---
-print_message "Checking port availability..."
+print_step "Checking port availability"
 check_port_availability ${N8N_PORT} "n8n"
 check_port_availability ${POSTGRES_PORT} "PostgreSQL"
 
 # --- System Preparation ---
-print_message "Installing prerequisites..."
-apt-get update > /dev-null 2>&1
-apt-get install -y curl wget openssl nginx certbot python3-certbot-nginx ufw dnsutils > /dev/null 2>&1
+print_step "Installing prerequisites"
+apt-get update > /dev/null 2>&1
+apt-get install -y curl wget openssl nginx certbot python3-certbot-nginx ufw dnsutils bc > /dev/null 2>&1
+print_success "System packages installed"
 
-print_message "Installing Docker & Docker Compose..."
+print_step "Installing Docker & Docker Compose"
 if ! command -v docker &> /dev/null; then 
+    print_message "Installing Docker..."
     curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
     sh /tmp/get-docker.sh > /dev/null 2>&1
     rm /tmp/get-docker.sh
+    print_success "Docker installed"
 fi
+
 if ! docker compose version &> /dev/null 2>&1; then 
+    print_message "Installing Docker Compose..."
     apt-get install -y docker-compose-plugin > /dev/null 2>&1
+    print_success "Docker Compose installed"
 fi
 
 systemctl enable --now nginx > /dev/null 2>&1
 
 # Firewall configuration
-print_message "Configuring firewall..."
+print_step "Configuring firewall ${SHIELD}"
 ufw allow 22/tcp > /dev/null 2>&1
 ufw allow 80/tcp > /dev/null 2>&1
 ufw allow 443/tcp > /dev/null 2>&1
 
 if ! ufw status | grep -q "Status: active"; then
-    print_message "UFW is not active. Enabling firewall automatically..."
+    print_message "Enabling firewall..."
     ufw --force enable > /dev/null 2>&1
-    print_message "Firewall enabled successfully."
+    print_success "Firewall enabled successfully"
 fi
 
 # --- System Optimization for Redis ---
-print_message "Optimizing system for Redis performance (memory overcommit)..."
+print_step "Optimizing system for Redis performance"
 echo "vm.overcommit_memory = 1" >> /etc/sysctl.conf
 sysctl -p > /dev/null 2>&1
+print_success "Memory overcommit configured"
 
 # --- n8n Configuration ---
-print_message "Setting up n8n directory structure..."
+print_step "Setting up n8n directory structure ${GEAR}"
 mkdir -p $N8N_DIR/{db_data,n8n_storage,redis_data}
 mkdir -p $BACKUP_DIR
 chown -R 1000:1000 $N8N_DIR/n8n_storage
@@ -336,7 +447,7 @@ services:
 EOF
 
 # --- Nginx and SSL ---
-print_message "Configuring Nginx for SSL challenge..."
+print_step "Configuring Nginx for SSL challenge"
 mkdir -p "/var/www/${DOMAIN}/.well-known/acme-challenge"
 chown www-data:www-data "/var/www/${DOMAIN}" -R
 
@@ -359,18 +470,21 @@ systemctl restart nginx
 
 check_dns_resolution "${DOMAIN}"
 
-print_message "Obtaining SSL certificate from Let's Encrypt..."
+print_step "Obtaining SSL certificate from Let's Encrypt ${SHIELD}"
 if ! certbot certonly --webroot -w "/var/www/${DOMAIN}" -d "${DOMAIN}" --non-interactive --agree-tos -m "${EMAIL}" --deploy-hook "systemctl reload nginx"; then
     print_error "Certbot failed. Please check that your DNS A record for '${DOMAIN}' points to this server."
     exit 1
 fi
+print_success "SSL certificate obtained successfully!"
 
 print_message "Creating stronger SSL security parameters..."
 if [ ! -f "/etc/letsencrypt/options-ssl-nginx.conf" ]; then 
     wget -O /etc/letsencrypt/options-ssl-nginx.conf https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf > /dev/null 2>&1
 fi
 if [ ! -f "/etc/letsencrypt/ssl-dhparams.pem" ]; then 
+    print_message "Generating DH parameters (this may take a minute)..."
     openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048 > /dev/null 2>&1
+    print_success "DH parameters generated"
 fi
 
 print_message "Configuring final Nginx production setup..."
@@ -490,11 +604,11 @@ EOF
 systemctl reload nginx
 
 # --- Start Services ---
-print_message "Starting n8n services..."
+print_step "Starting n8n services ${ROCKET}"
 docker compose up -d --scale n8n-worker=1
 
-print_message "Waiting for database initialization (this may take 30-60 seconds on first run)..."
-sleep 20
+print_message "Waiting for database initialization ${DATABASE}"
+echo -n "This may take 30-60 seconds on first run"
 
 # Check for specific table
 MAX_WAIT=120
@@ -509,7 +623,8 @@ while [ $ELAPSED -lt $MAX_WAIT ]; do
     if [ "$TABLE_EXISTS" = "1" ]; then
         TABLE_COUNT=$(docker exec n8n-postgres psql -U ${POSTGRES_NON_ROOT_USER} -d ${POSTGRES_DB} -t -c \
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null | xargs || echo "0")
-        print_message "Database initialized successfully with $TABLE_COUNT tables!"
+        echo ""
+        print_success "Database initialized successfully with $TABLE_COUNT tables!"
         DB_INITIALIZED=true
         break
     fi
@@ -520,6 +635,7 @@ while [ $ELAPSED -lt $MAX_WAIT ]; do
 done
 
 if [ "$DB_INITIALIZED" = "false" ]; then
+    echo ""
     print_error "Database initialization failed after ${MAX_WAIT} seconds"
     print_error "Check logs with: docker compose logs"
     exit 1
@@ -536,7 +652,7 @@ while [ $ELAPSED -lt $MAX_WAIT ]; do
     MAIN_HEALTHY=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:${N8N_PORT}/healthz 2>/dev/null || echo "000")
 
     if [ "$POSTGRES_HEALTHY" = "healthy" ] && [ "$REDIS_HEALTHY" = "healthy" ] && [ "$MAIN_HEALTHY" = "200" ]; then
-        print_message "All services are healthy and running!"
+        print_success "All services are healthy and running!"
         break
     fi
     
@@ -546,14 +662,16 @@ while [ $ELAPSED -lt $MAX_WAIT ]; do
 done
 
 if [ $ELAPSED -ge $MAX_WAIT ]; then
+    echo ""
     print_error "Services failed to become healthy after ${MAX_WAIT} seconds"
     print_error "Check logs with: docker compose logs --tail=50"
     exit 1
 fi
 
 # --- Auxiliary Scripts ---
-print_message "Creating helper scripts (backup, restore, worker manager)..."
+print_step "Creating helper scripts"
 
+print_message "Creating backup script..."
 cat > ${BACKUP_DIR}/backup.sh <<'EOF'
 #!/bin/bash
 BACKUP_DIR="/opt/backups/n8n"
@@ -566,6 +684,7 @@ echo "Backup completed: db_${DATE}.sql.gz and files_${DATE}.tar.gz"
 EOF
 chmod +x ${BACKUP_DIR}/backup.sh
 
+print_message "Creating restore script..."
 cat > ${BACKUP_DIR}/restore.sh <<'EOF'
 #!/bin/bash
 DATE=$1
@@ -601,11 +720,14 @@ echo "Restore completed."
 EOF
 chmod +x ${BACKUP_DIR}/restore.sh
 
+print_message "Creating worker manager script..."
 cat > ${N8N_DIR}/manage-workers.sh <<'EOF'
 #!/bin/bash
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m'
 
 cd /opt/n8n || { echo -e "${RED}Error: Directory /opt/n8n not found.${NC}"; exit 1; }
@@ -614,26 +736,35 @@ get_current_workers() {
     docker compose ps n8n-worker 2>/dev/null | tail -n +2 | wc -l
 }
 
-echo -e "${GREEN}========================================${NC}"
-echo -e "${YELLOW}      n8n Worker Manager${NC}"
-echo -e "${GREEN}========================================${NC}\n"
+echo -e "${CYAN}"
+echo "╔══════════════════════════════════════╗"
+echo "║      n8n Worker Manager              ║"
+echo "╚══════════════════════════════════════╝"
+echo -e "${NC}\n"
 
 CURRENT_WORKERS=$(get_current_workers)
 echo -e "Current number of running workers: ${GREEN}${CURRENT_WORKERS}${NC}"
 
 # Get current concurrency setting
 CONCURRENCY=$(grep QUEUE_WORKER_CONCURRENCY /opt/n8n/.env | cut -d'=' -f2 || echo "5")
-echo -e "Each worker handles up to ${GREEN}${CONCURRENCY}${NC} concurrent jobs\n"
+echo -e "Each worker handles up to ${GREEN}${CONCURRENCY}${NC} concurrent jobs"
+echo -e "Total capacity: ${BOLD}${GREEN}$((CURRENT_WORKERS * CONCURRENCY))${NC} concurrent executions\n"
 
 while true; do
-    read -p "Select: [1] Add worker, [2] Remove worker, [3] Change concurrency, [q] Quit: " choice
+    echo -e "${CYAN}Options:${NC}"
+    echo "  [1] Add worker"
+    echo "  [2] Remove worker"
+    echo "  [3] Change concurrency"
+    echo "  [q] Quit"
+    echo ""
+    read -p "Select option: " choice
     echo ""
     case $choice in
         1)
             NEW_COUNT=$((CURRENT_WORKERS + 1))
             echo -e "Adding worker... Setting total to: ${GREEN}${NEW_COUNT}${NC}"
             docker compose up -d --scale n8n-worker=${NEW_COUNT}
-            echo -e "\n${GREEN}✔ Done!${NC}"
+            echo -e "\n${GREEN}✓ Done!${NC}"
             break
             ;;
         2)
@@ -644,7 +775,7 @@ while true; do
             NEW_COUNT=$((CURRENT_WORKERS - 1))
             echo -e "Removing worker... Setting total to: ${GREEN}${NEW_COUNT}${NC}"
             docker compose up -d --scale n8n-worker=${NEW_COUNT}
-            echo -e "\n${GREEN}✔ Done!${NC}"
+            echo -e "\n${GREEN}✓ Done!${NC}"
             break
             ;;
         3)
@@ -653,7 +784,7 @@ while true; do
                 sed -i "s/QUEUE_WORKER_CONCURRENCY=.*/QUEUE_WORKER_CONCURRENCY=$NEW_CONC/" /opt/n8n/.env
                 echo -e "${GREEN}Concurrency updated to $NEW_CONC. Restarting workers...${NC}"
                 docker compose restart n8n-worker
-                echo -e "\n${GREEN}✔ Done!${NC}"
+                echo -e "\n${GREEN}✓ Done!${NC}"
             else
                 echo -e "${RED}Invalid value. Must be between 1-20.${NC}"
             fi
@@ -676,7 +807,7 @@ EOF
 chmod +x ${N8N_DIR}/manage-workers.sh
 
 # --- Cron Jobs ---
-print_message "Setting up cron jobs for backup and maintenance..."
+print_step "Setting up cron jobs ${CLOCK}"
 
 CRON_BACKUP_JOB="0 3 * * * ${BACKUP_DIR}/backup.sh > /var/log/n8n_backup.log 2>&1"
 CRON_PRUNE_JOB="0 4 * * 0 docker system prune -af > /var/log/docker_prune.log 2>&1"
@@ -689,37 +820,34 @@ echo "$CRON_PRUNE_JOB" >> "$CRON_TEMP"
 echo "$CRON_CERT_RENEW_JOB" >> "$CRON_TEMP"
 crontab "$CRON_TEMP"
 rm -f "$CRON_TEMP"
+print_success "Automated tasks configured"
 
 # --- Final Message ---
 echo ""
-echo "=========================================="
-echo -e "${GREEN}   Installation Completed!${NC}"
-echo "=========================================="
+echo -e "${GREEN}============================================================${NC}"
+echo -e "${GREEN}${BOLD}     ${ROCKET} Installation Completed Successfully! ${ROCKET}${NC}"
+echo -e "${GREEN}============================================================${NC}"
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo -e "${YELLOW}           NEXT STEPS${NC}"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  1. Visit https://${DOMAIN} to create your admin account"
-echo "  2. Review your credentials in ${N8N_DIR}/.env"
-echo "  3. Use the worker manager to adjust performance:"
-echo -e "     ${GREEN}bash ${N8N_DIR}/manage-workers.sh${NC}"
+echo -e "${CYAN}${BOLD}NEXT STEPS${NC}"
+echo -e "${CYAN}------------------------------------------------------------${NC}"
+echo -e "${CHECK} Visit: ${BOLD}${BLUE}https://${DOMAIN}${NC}"
+echo -e "${CHECK} Admin setup: Create your first admin account"
+echo -e "${CHECK} Credentials: ${DIM}${N8N_DIR}/.env${NC}"
+echo -e "${CHECK} Worker management: ${DIM}bash ${N8N_DIR}/manage-workers.sh${NC}"
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "DATABASE STATUS:"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  PostgreSQL Tables: ${TABLE_COUNT:-0}"
-echo "  Expected: 40+ tables for successful initialization"
+echo -e "${PURPLE}${BOLD}${DATABASE} DATABASE STATUS${NC}"
+echo -e "${PURPLE}------------------------------------------------------------${NC}"
+echo -e "PostgreSQL Tables: ${GREEN}${TABLE_COUNT:-0}${NC}"
+echo -e "Expected: ${GREEN}40+ tables${NC} for successful initialization"
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "FEATURES ENABLED:"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  ✓ Production Queue Mode with Redis 7"
-echo "  ✓ PostgreSQL database (not SQLite)"
-echo "  ✓ Default: 1 worker × 5 jobs = 5 concurrent executions"
-echo "  ✓ Automatic daily backups at 3 AM"
-echo "  ✓ Automatic SSL renewal"
-echo "  ✓ PostgreSQL on port ${POSTGRES_PORT}"
-echo "  ✓ Worker concurrency properly configured"
-echo "  ✓ Trust proxy properly configured"
-echo "  ✓ Binary data preview fixed"
+echo -e "${YELLOW}${BOLD}${STAR} FEATURES ENABLED${NC}"
+echo -e "${YELLOW}------------------------------------------------------------${NC}"
+echo -e "${GREEN}${CHECK}${NC} Production Queue Mode with Redis 7"
+echo -e "${GREEN}${CHECK}${NC} PostgreSQL database on port ${POSTGRES_PORT}"
+echo -e "${GREEN}${CHECK}${NC} Default: 1 worker × 5 jobs = 5 concurrent executions"
+echo -e "${GREEN}${CHECK}${NC} Automatic daily backups at 3 AM"
+echo -e "${GREEN}${CHECK}${NC} Automatic SSL renewal"
+echo -e "${GREEN}${CHECK}${NC} Worker concurrency properly configured"
+echo -e "${GREEN}${CHECK}${NC} Trust proxy properly configured"
+echo -e "${GREEN}${CHECK}${NC} Binary data preview fixed"
 echo ""
