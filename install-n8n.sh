@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# n8n Installer v3.23 - Production Grade Edition
+# n8n Installer v3.24 - Production Grade Edition
 # For Ubuntu 20.04, 22.04, 24.04
 # Features: Complete Docker configuration, latest stable n8n, manual update control
+# v3.24: Added extra_hosts for Supabase integration (host.docker.internal)
 
 set -euo pipefail
 
@@ -63,7 +64,7 @@ show_header() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo -e "${NC}"
     echo -e "${BOLD}${WHITE}    Automated Workflow Platform Installer${NC}"
-    echo -e "${DIM}    Version 3.23 - Production Edition${NC}"
+    echo -e "${DIM}    Version 3.24 - Production Edition${NC}"
     echo -e "${YELLOW}    n8n Version: ${N8N_VERSION} (auto-updates to latest stable)${NC}"
     echo ""
 }
@@ -218,6 +219,7 @@ echo -e "  ${GREEN}${CHECK}${NC} Automatic daily backups"
 echo -e "  ${GREEN}${CHECK}${NC} Worker management script"
 echo -e "  ${GREEN}${CHECK}${NC} Automatic SSL renewal"
 echo -e "  ${GREEN}${CHECK}${NC} Log rotation (10MB per container)"
+echo -e "  ${GREEN}${CHECK}${NC} Supabase integration ready (host.docker.internal)"
 echo ""
 
 echo -e "${BOLD}${YELLOW}${WARNING} Minimum Requirements:${NC}"
@@ -383,7 +385,7 @@ fi
 EOF
 chmod +x init-data.sh
 
-print_message "Creating Docker Compose file with fixed version..."
+print_message "Creating Docker Compose file with Supabase integration support..."
 cat > docker-compose.yml <<EOF
 networks:
   n8n_net:
@@ -447,6 +449,8 @@ services:
       - "127.0.0.1:\${N8N_PORT}:5678"
     volumes:
       - ./n8n_storage:/home/node/.n8n
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -477,6 +481,8 @@ services:
       - EXECUTIONS_MODE=queue
     volumes:
       - ./n8n_storage:/home/node/.n8n
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -1035,6 +1041,13 @@ echo -e "${GREEN}${CHECK}${NC} PostgreSQL database on port ${POSTGRES_PORT}"
 echo -e "${GREEN}${CHECK}${NC} Default: 1 worker × 5 jobs = 5 concurrent executions"
 echo -e "${GREEN}${CHECK}${NC} Automatic daily backups at 3 AM"
 echo -e "${GREEN}${CHECK}${NC} Automatic SSL renewal"
+echo -e "${GREEN}${CHECK}${NC} Supabase integration ready (host.docker.internal configured)"
+echo ""
+echo -e "${BOLD}${CYAN}Supabase Integration:${NC}"
+echo -e "  If Supabase is on the same server, use:"
+echo -e "    Host: ${GREEN}host.docker.internal${NC}"
+echo -e "    Port: ${GREEN}5432${NC}"
+echo -e "  Run ${YELLOW}bash /root/harden_supabase_db.sh${NC} on Supabase server first"
 echo ""
 echo -e "${BOLD}${CYAN}To update n8n in the future:${NC}"
 echo -e "  sudo bash /opt/n8n/update-n8n.sh"
