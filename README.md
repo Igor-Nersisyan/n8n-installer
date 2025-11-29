@@ -8,7 +8,7 @@
 
 ## 🎯 What is this?
 
-A battle-tested installation script that sets up n8n workflow automation platform with enterprise-grade configuration in minutes. No Docker knowledge required. This Production Grade Edition includes queue mode for scalability, Redis integration, worker management, and fixes for common issues like binary data preview and trust proxy configuration.
+A battle-tested installation script that sets up n8n workflow automation platform with enterprise-grade configuration in minutes. No Docker knowledge required. This Production Grade Edition includes queue mode for scalability, Redis integration, worker management, and seamless integration with self-hosted Supabase.
 
 ## ✨ Features
 
@@ -21,6 +21,7 @@ A battle-tested installation script that sets up n8n workflow automation platfor
 - ✅ **UFW firewall** auto-configuration
 
 ### Production Optimizations
+- 🔌 **Supabase Integration**: Pre-configured `host.docker.internal` mapping for easy DB connection
 - 🔄 **Queue Mode** enabled for scalability with worker concurrency (default: 5 jobs per worker)
 - 🧑‍💻 **Worker management script** for easy scaling (add/remove workers, adjust concurrency)
 - 🔄 **Automated daily backups** (3:00 AM, 14-day retention)
@@ -40,7 +41,7 @@ A battle-tested installation script that sets up n8n workflow automation platfor
 - **RAM**: Minimum 2GB (for queue mode and Redis)
 - **CPU**: Minimum 1 core (scale workers for more)
 - **Storage**: Minimum 10 GB
-- **Network**: 
+- **Network**:
   - Root access
   - Public IP address
   - Domain name with A record pointing to server
@@ -81,6 +82,22 @@ The script performs DNS checks and port availability verification before proceed
 ├── restore.sh            # Restore script
 └── *.gz                  # Backup files
 ```
+
+## 🔌 Supabase Integration
+
+This installer is optimized to work alongside Supabase on the same server.
+
+### How to connect n8n to Supabase DB:
+If Supabase is running on the same server, use these credentials in n8n Postgres node:
+
+- **Host**: `host.docker.internal`
+- **Port**: `5432` (Standard Supabase port)
+- **Database**: `postgres`
+- **User**: `postgres`
+- **Password**: Your Supabase DB password
+- **SSL**: Disable
+
+**Note:** Ensure you have run the **Supabase Hardening Script** (`harden_supabase_db.sh`) and selected **Option 1** (Same Server) to allow the connection.
 
 ## 🛠️ Management Commands
 
