@@ -21,7 +21,7 @@ A battle-tested installation script that sets up n8n workflow automation platfor
 - ✅ **UFW firewall** auto-configuration
 
 ### Production Optimizations
-- 🔌 **Supabase Integration**: Pre-configured `host.docker.internal` mapping for easy DB connection
+- 🔌 **Supabase Integration**: Fully compatible with self-hosted Supabase credentials
 - 🔄 **Queue Mode** enabled for scalability with worker concurrency (default: 5 jobs per worker)
 - 🧑‍💻 **Worker management script** for easy scaling (add/remove workers, adjust concurrency)
 - 🔄 **Automated daily backups** (3:00 AM, 14-day retention)
@@ -82,22 +82,21 @@ The script performs DNS checks and port availability verification before proceed
 ├── restore.sh            # Restore script
 └── *.gz                  # Backup files
 ```
-
 ## 🔌 Supabase Integration
 
-This installer is optimized to work alongside Supabase on the same server.
+This installer is optimized to work alongside self-hosted Supabase.
 
 ### How to connect n8n to Supabase DB:
-If Supabase is running on the same server, use these credentials in n8n Postgres node:
+Use the **Postgres** node in n8n with the credentials provided by the Supabase installer:
 
-- **Host**: `host.docker.internal`
-- **Port**: `5432` (Standard Supabase port)
+- **Host**: `your-supabase-domain.com` (or Server IP)
+- **Port**: `5432`
 - **Database**: `postgres`
-- **User**: `postgres`
-- **Password**: Your Supabase DB password
+- **User**: `postgres.postgres`
+- **Password**: Your `POSTGRES_PASSWORD`
 - **SSL**: Disable
 
-**Note:** Ensure you have run the **Supabase Hardening Script** (`harden_supabase_db.sh`) and selected **Option 1** (Same Server) to allow the connection.
+**Note:** Ensure you have run the **Supabase Hardening Script** (`harden_supabase_db.sh`) on your Supabase server and whitelisted this server's IP (if they are on different servers) or selected the appropriate access mode.
 
 ## 🛠️ Management Commands
 
