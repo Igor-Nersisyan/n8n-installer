@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# n8n Installer v3.24 - Production Grade Edition
+# n8n Installer v3.26 - Production Grade Edition
 # For Ubuntu 20.04, 22.04, 24.04
 # Features: Complete Docker configuration, latest stable n8n, manual update control
-# v3.24: Added extra_hosts for Supabase integration (host.docker.internal)
+# v3.26: Added certbot retry logic for temporary DNS issues
 
 set -euo pipefail
 
@@ -48,6 +48,32 @@ print_error() { echo -e "${RED}${CROSS}${NC} ${RED}$1${NC}"; }
 print_warning() { echo -e "${YELLOW}${WARNING}${NC} ${YELLOW}$1${NC}"; }
 print_step() { echo -e "\n${PURPLE}${ARROW}${NC} ${BOLD}$1${NC}"; }
 
+# --- Fix Repository Mirrors ---
+fix_apt_mirrors() {
+    # Replace ANY non-official Ubuntu mirrors with archive.ubuntu.com
+    # This fixes issues with Beget, Hetzner, OVH, Selectel, Timeweb, etc.
+    # Keep only: archive.ubuntu.com, security.ubuntu.com, [country].archive.ubuntu.com
+    
+    local files=$(find /etc/apt -name "*.list" -o -name "*.sources" 2>/dev/null)
+    
+    for file in $files /etc/apt/sources.list; do
+        [ -f "$file" ] || continue
+        
+        # Replace any mirror that is NOT official Ubuntu
+        sed -i \
+            -e 's|http://[^/]*\.clouds\.archive\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+            -e 's|http://[^/]*beget[^/]*/[^ ]*ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+            -e 's|http://public-mirrors[^/]*/[^ ]*ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+            -e 's|http://mirror\.[^/]*/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+            -e 's|http://mirrors\.[^/]*/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+            "$file" 2>/dev/null || true
+    done
+    
+    # Clean apt cache completely
+    apt-get clean > /dev/null 2>&1
+    rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+}
+
 # --- ASCII Art Header ---
 show_header() {
     clear
@@ -64,7 +90,7 @@ show_header() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo -e "${NC}"
     echo -e "${BOLD}${WHITE}    Automated Workflow Platform Installer${NC}"
-    echo -e "${DIM}    Version 3.24 - Production Edition${NC}"
+    echo -e "${DIM}    Version 3.26 - Production Edition${NC}"
     echo -e "${YELLOW}    n8n Version: ${N8N_VERSION} (auto-updates to latest stable)${NC}"
     echo ""
 }
@@ -247,21 +273,14 @@ print_step "Checking port availability"
 check_port_availability ${N8N_PORT} "n8n"
 check_port_availability ${POSTGRES_PORT} "PostgreSQL"
 
-print_step "Installing prerequisites"
+# --- Fix mirrors BEFORE any apt operations ---
+print_step "Fixing repository mirrors"
+fix_apt_mirrors
+print_success "Repository mirrors configured"
 
 # --- System Preparation ---
-
-# Fix potential mirror sync issues
-if ! apt-get update 2>&1 | grep -q "^E:"; then
-    : # OK
-else
-    print_warning "Repository mirror issues detected, switching to official Ubuntu mirrors..."
-    sed -i 's|http://.*\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/*.list /etc/apt/sources.list 2>/dev/null || true
-    sed -i 's|http://.*\.beget\.ru[^[:space:]]*|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/*.list /etc/apt/sources.list 2>/dev/null || true
-    apt-get clean
-    apt-get update > /dev/null 2>&1
-fi
-
+print_step "Installing prerequisites"
+apt-get update > /dev/null 2>&1
 apt-get install -y curl wget openssl nginx certbot python3-certbot-nginx ufw dnsutils bc > /dev/null 2>&1
 print_success "System packages installed"
 
@@ -449,7 +468,7 @@ services:
         max-file: "3"
 
   n8n-main:
-    image: n8nio/n8n:${N8N_VERSION}
+    image: n8nio/n8n:\${N8N_VERSION}
     container_name: n8n-main
     restart: unless-stopped
     env_file: .env
@@ -482,7 +501,7 @@ services:
         max-file: "3"
 
   n8n-worker:
-    image: n8nio/n8n:${N8N_VERSION}
+    image: n8nio/n8n:\${N8N_VERSION}
     restart: unless-stopped
     command: worker --concurrency=\${QUEUE_WORKER_CONCURRENCY:-5}
     env_file: .env
@@ -534,8 +553,33 @@ systemctl restart nginx
 check_dns_resolution "${DOMAIN}"
 
 print_step "Obtaining SSL certificate from Let's Encrypt ${SHIELD}"
-if ! certbot certonly --webroot -w "/var/www/${DOMAIN}" -d "${DOMAIN}" --non-interactive --agree-tos -m "${EMAIL}" --deploy-hook "systemctl reload nginx"; then
-    print_error "Certbot failed. Please check that your DNS A record for '${DOMAIN}' points to this server."
+
+# Retry logic for certbot (DNS/CAA issues are often temporary)
+CERTBOT_MAX_ATTEMPTS=5
+CERTBOT_ATTEMPT=1
+CERTBOT_SUCCESS=false
+
+while [ $CERTBOT_ATTEMPT -le $CERTBOT_MAX_ATTEMPTS ]; do
+    print_message "Attempt ${CERTBOT_ATTEMPT}/${CERTBOT_MAX_ATTEMPTS}..."
+    
+    if certbot certonly --webroot -w "/var/www/${DOMAIN}" -d "${DOMAIN}" --non-interactive --agree-tos -m "${EMAIL}" --deploy-hook "systemctl reload nginx" 2>&1; then
+        CERTBOT_SUCCESS=true
+        break
+    fi
+    
+    if [ $CERTBOT_ATTEMPT -lt $CERTBOT_MAX_ATTEMPTS ]; then
+        print_warning "Certificate request failed, retrying in 30 seconds..."
+        print_warning "This is often caused by temporary DNS issues"
+        sleep 30
+    fi
+    
+    CERTBOT_ATTEMPT=$((CERTBOT_ATTEMPT + 1))
+done
+
+if [ "$CERTBOT_SUCCESS" = "false" ]; then
+    print_error "Certbot failed after ${CERTBOT_MAX_ATTEMPTS} attempts."
+    print_error "Please check that your DNS A record for '${DOMAIN}' points to this server."
+    print_warning "You can retry manually later: certbot certonly --webroot -w /var/www/${DOMAIN} -d ${DOMAIN}"
     exit 1
 fi
 print_success "SSL certificate obtained successfully!"
