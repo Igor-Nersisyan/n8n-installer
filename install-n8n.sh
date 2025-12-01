@@ -247,9 +247,22 @@ print_step "Checking port availability"
 check_port_availability ${N8N_PORT} "n8n"
 check_port_availability ${POSTGRES_PORT} "PostgreSQL"
 
+print_step "Installing prerequisites"
+
 # --- System Preparation ---
 print_step "Installing prerequisites"
-apt-get update > /dev/null 2>&1
+
+# Fix potential mirror sync issues
+if ! apt-get update 2>&1 | grep -q "^E:"; then
+    : # OK
+else
+    print_warning "Repository mirror issues detected, switching to official Ubuntu mirrors..."
+    sed -i 's|http://.*\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/*.list /etc/apt/sources.list 2>/dev/null || true
+    sed -i 's|http://.*\.beget\.ru[^[:space:]]*|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/*.list /etc/apt/sources.list 2>/dev/null || true
+    apt-get clean
+    apt-get update > /dev/null 2>&1
+fi
+
 apt-get install -y curl wget openssl nginx certbot python3-certbot-nginx ufw dnsutils bc > /dev/null 2>&1
 print_success "System packages installed"
 
