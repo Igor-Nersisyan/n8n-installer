@@ -250,7 +250,6 @@ check_port_availability ${POSTGRES_PORT} "PostgreSQL"
 print_step "Installing prerequisites"
 
 # --- System Preparation ---
-print_step "Installing prerequisites"
 
 # Fix potential mirror sync issues
 if ! apt-get update 2>&1 | grep -q "^E:"; then
