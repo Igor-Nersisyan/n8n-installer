@@ -835,10 +835,16 @@ docker compose down
 
 # Update version in .env file
 echo -e "\n${CYAN}Updating configuration...${NC}"
-if [ "$TARGET_VERSION" == "latest" ]; then
-    sed -i 's/^N8N_VERSION=.*/N8N_VERSION=latest/' .env
+if grep -q "^N8N_VERSION=" .env; then
+    # Variable exists - update it
+    if [ "$TARGET_VERSION" == "latest" ]; then
+        sed -i 's/^N8N_VERSION=.*/N8N_VERSION=latest/' .env
+    else
+        sed -i "s/^N8N_VERSION=.*/N8N_VERSION=${TARGET_VERSION}/" .env
+    fi
 else
-    sed -i "s/^N8N_VERSION=.*/N8N_VERSION=${TARGET_VERSION}/" .env
+    # Variable doesn't exist - add it
+    echo "N8N_VERSION=${TARGET_VERSION}" >> .env
 fi
 
 # Update docker-compose.yml to use the new version
