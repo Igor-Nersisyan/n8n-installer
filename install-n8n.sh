@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# n8n Installer v3.26 - Production Grade Edition
+# n8n Installer v3.27 - Production Grade Edition
 # For Ubuntu 20.04, 22.04, 24.04
 # Features: Complete Docker configuration, latest stable n8n, manual update control
-# v3.26: Added certbot retry logic for temporary DNS issues
+# v3.27: Fixed apt sources duplicate issue on Ubuntu 24.04 (DEB822 format)
 
 set -euo pipefail
 
@@ -52,22 +52,40 @@ print_step() { echo -e "\n${PURPLE}${ARROW}${NC} ${BOLD}$1${NC}"; }
 fix_apt_mirrors() {
     # Replace ANY non-official Ubuntu mirrors with archive.ubuntu.com
     # This fixes issues with Beget, Hetzner, OVH, Selectel, Timeweb, etc.
-    # Keep only: archive.ubuntu.com, security.ubuntu.com, [country].archive.ubuntu.com
     
-    local files=$(find /etc/apt -name "*.list" -o -name "*.sources" 2>/dev/null)
-    
-    for file in $files /etc/apt/sources.list; do
-        [ -f "$file" ] || continue
-        
-        # Replace any mirror that is NOT official Ubuntu
+    # Ubuntu 24.04+ uses DEB822 format in /etc/apt/sources.list.d/ubuntu.sources
+    # If that file exists, we should fix it and clear old sources.list to avoid duplicates
+    if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+        # Fix mirrors in new format file
         sed -i \
             -e 's|http://[^/]*\.clouds\.archive\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
-            -e 's|http://[^/]*beget[^/]*/[^ ]*ubuntu|http://archive.ubuntu.com/ubuntu|g' \
-            -e 's|http://public-mirrors[^/]*/[^ ]*ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+            -e 's|http://[^/]*beget[^/]*/[^ ]*|http://archive.ubuntu.com/ubuntu|g' \
+            -e 's|http://public-mirrors[^/]*/[^ ]*|http://archive.ubuntu.com/ubuntu|g' \
             -e 's|http://mirror\.[^/]*/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
             -e 's|http://mirrors\.[^/]*/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
-            "$file" 2>/dev/null || true
-    done
+            -e 's|http://nova\.clouds\.archive\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+            /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+        
+        # Clear old sources.list to prevent duplicates
+        cat /dev/null > /etc/apt/sources.list 2>/dev/null || true
+    else
+        # Old format - fix sources.list directly
+        if [ -f /etc/apt/sources.list ]; then
+            sed -i \
+                -e 's|http://[^/]*\.clouds\.archive\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+                -e 's|http://[^/]*beget[^/]*/[^ ]*|http://archive.ubuntu.com/ubuntu|g' \
+                -e 's|http://public-mirrors[^/]*/[^ ]*|http://archive.ubuntu.com/ubuntu|g' \
+                -e 's|http://mirror\.[^/]*/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+                -e 's|http://mirrors\.[^/]*/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+                /etc/apt/sources.list 2>/dev/null || true
+        fi
+    fi
+    
+    # Also fix any .list files in sources.list.d
+    find /etc/apt/sources.list.d -name "*.list" -exec sed -i \
+        -e 's|http://[^/]*beget[^/]*/[^ ]*|http://archive.ubuntu.com/ubuntu|g' \
+        -e 's|http://public-mirrors[^/]*/[^ ]*|http://archive.ubuntu.com/ubuntu|g' \
+        {} \; 2>/dev/null || true
     
     # Clean apt cache completely
     apt-get clean > /dev/null 2>&1
@@ -90,7 +108,7 @@ show_header() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo -e "${NC}"
     echo -e "${BOLD}${WHITE}    Automated Workflow Platform Installer${NC}"
-    echo -e "${DIM}    Version 3.26 - Production Edition${NC}"
+    echo -e "${DIM}    Version 3.27 - Production Edition${NC}"
     echo -e "${YELLOW}    n8n Version: ${N8N_VERSION} (auto-updates to latest stable)${NC}"
     echo ""
 }
