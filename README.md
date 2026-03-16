@@ -2,7 +2,7 @@
 
 🚀 **Automated production-ready n8n installation script for Ubuntu servers**
 
-[![Version](https://img.shields.io/badge/version-3.24-blue.svg)](https://github.com/Igor-Nersisyan/n8n-installer)
+[![Version](https://img.shields.io/badge/version-3.28-blue.svg)](https://github.com/Igor-Nersisyan/n8n-installer)
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-20.04%20|%2022.04%20|%2024.04-orange.svg)](https://ubuntu.com/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -21,7 +21,7 @@ A battle-tested installation script that sets up n8n workflow automation platfor
 - ✅ **UFW firewall** auto-configuration
 
 ### Production Optimizations
-- 🔌 **Supabase Integration**: Fully compatible with self-hosted Supabase credentials
+- 🔌 **Supabase Integration**: Fully compatible with self-hosted Supabase (`host.docker.internal` pre-configured)
 - 🔄 **Queue Mode** enabled for scalability with worker concurrency (default: 5 jobs per worker)
 - 🧑‍💻 **Worker management script** for easy scaling (add/remove workers, adjust concurrency)
 - 🔄 **Automated daily backups** (3:00 AM, 14-day retention)
@@ -34,6 +34,12 @@ A battle-tested installation script that sets up n8n workflow automation platfor
   - UI/API: 5 minutes
   - Static assets: 7-day cache
 - 🛠️ **Fixes**: Binary data preview (text files), CSS/JS loading, worker concurrency, trust proxy
+
+### SSL Auto-Renewal (v3.28)
+- ✅ **Nginx acme-challenge** location in port 80 block — certbot webroot works correctly
+- ✅ **deploy-hook** saved in certbot renewal config — nginx reloads after certificate renewal
+- ✅ **Cron fallback** — daily renewal check at 2 AM as backup
+- ✅ **Ubuntu systemd timer** — certbot.timer uses saved renew_hook automatically
 
 ## 📋 Requirements
 
@@ -75,13 +81,15 @@ The script performs DNS checks and port availability verification before proceed
 ├── db_data/              # PostgreSQL data
 ├── redis_data/           # Redis data
 ├── init-data.sh          # Database initialization
-└── manage-workers.sh     # Worker scaling script
+├── manage-workers.sh     # Worker scaling script
+└── update-n8n.sh         # Safe update script
 
 /opt/backups/n8n/
 ├── backup.sh             # Backup script
 ├── restore.sh            # Restore script
 └── *.gz                  # Backup files
 ```
+
 ## 🔌 Supabase Integration
 
 This installer is optimized to work alongside self-hosted Supabase.
@@ -89,7 +97,7 @@ This installer is optimized to work alongside self-hosted Supabase.
 ### How to connect n8n to Supabase DB:
 Use the **Postgres** node in n8n with the credentials provided by the Supabase installer:
 
-- **Host**: `your-supabase-domain.com` (or Server IP)
+- **Host**: `host.docker.internal` (same server) or server IP (different servers)
 - **Port**: `5432`
 - **Database**: `postgres`
 - **User**: `postgres.postgres`
@@ -141,6 +149,22 @@ Options:
 
 Default: 1 worker × 5 concurrent jobs = 5 executions
 
+### Updating n8n
+
+Use the dedicated safe update script:
+
+```bash
+sudo bash /opt/n8n/update-n8n.sh
+```
+
+The script will:
+1. Show current version
+2. Ask for target version (or `latest`)
+3. Create automatic backup
+4. Pull new images and restart
+5. Verify health of all services
+6. Clean up old Docker images
+
 ### Backup & Restore
 
 ```bash
@@ -178,6 +202,7 @@ Located at `/etc/nginx/sites-available/your-domain`:
 - Trust proxy and forwarded headers
 - HSTS, security headers enabled
 - Client max body size: 100MB
+- ACME challenge location for SSL auto-renewal (v3.28)
 
 ### PostgreSQL
 - Port: 5433 (localhost only)
@@ -203,8 +228,17 @@ Located at `/etc/nginx/sites-available/your-domain`:
 
 ### SSL certificate issues
 ```bash
-# Manually renew
-certbot renew --deploy-hook "systemctl reload nginx"
+# Check certificate status
+certbot certificates
+
+# Check renewal config has deploy hook
+grep renew_hook /etc/letsencrypt/renewal/your-domain.conf
+
+# Test renewal (dry run)
+certbot renew --dry-run
+
+# Force renewal
+certbot renew --force-renewal
 ```
 
 ### Database connection errors
@@ -233,19 +267,6 @@ Typical resource consumption (with 1 worker):
 
 Scale workers for higher loads.
 
-## 🔄 Updates
-
-### Update n8n
-```bash
-cd /opt/n8n
-docker compose pull
-docker compose down
-docker compose up -d --scale n8n-worker=1  # Or your desired worker count
-```
-
-### Update installer
-For reinstalls, backup first, remove `/opt/n8n`, then run the latest script.
-
 ## 🔒 Security Considerations
 
 - ✅ Firewall configured (ports 22, 80, 443 only)
@@ -255,6 +276,18 @@ For reinstalls, backup first, remove `/opt/n8n`, then run the latest script.
 - ✅ Rate limiting and security headers
 - ✅ Encrypted credentials and secure cookies
 - ✅ Payload size limit (100MB)
+
+## 📝 Changelog
+
+### v3.28 (Latest)
+- **Fixed SSL auto-renewal**: Added `acme-challenge` location to final Nginx port 80 block. Without this, Let's Encrypt couldn't verify domain ownership because all port 80 traffic was redirected to HTTPS.
+
+### v3.27
+- Fixed apt sources duplicate issue on Ubuntu 24.04 (DEB822 format)
+
+### v3.24
+- Added `--deploy-hook` to initial `certbot certonly` command
+- Deploy hook is saved in certbot renewal config for systemd timer
 
 ## 🤝 Contributing
 
