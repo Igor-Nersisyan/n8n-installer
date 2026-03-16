@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# n8n Installer v3.27 - Production Grade Edition
+# n8n Installer v3.28 - Production Grade Edition
 # For Ubuntu 20.04, 22.04, 24.04
 # Features: Complete Docker configuration, latest stable n8n, manual update control
+# v3.28: Fixed SSL auto-renewal - added acme-challenge location to port 80 nginx block
 # v3.27: Fixed apt sources duplicate issue on Ubuntu 24.04 (DEB822 format)
 
 set -euo pipefail
@@ -108,7 +109,7 @@ show_header() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo -e "${NC}"
     echo -e "${BOLD}${WHITE}    Automated Workflow Platform Installer${NC}"
-    echo -e "${DIM}    Version 3.27 - Production Edition${NC}"
+    echo -e "${DIM}    Version 3.28 - Production Edition${NC}"
     echo -e "${YELLOW}    n8n Version: ${N8N_VERSION} (auto-updates to latest stable)${NC}"
     echo ""
 }
@@ -612,6 +613,8 @@ if [ ! -f "/etc/letsencrypt/ssl-dhparams.pem" ]; then
     print_success "DH parameters generated"
 fi
 
+# v3.28 FIX: Final nginx config now includes acme-challenge location in port 80 block
+# This ensures certbot can renew SSL certificates automatically
 print_message "Configuring final Nginx production setup..."
 cat > "/etc/nginx/sites-available/${DOMAIN}" <<NGINX_FINAL_EOF
 # Rate limiting with reasonable limits
@@ -625,6 +628,12 @@ map \$http_upgrade \$connection_upgrade {
 server { 
     listen 80; 
     server_name ${DOMAIN}; 
+    
+    # v3.28: Required for SSL auto-renewal via certbot webroot
+    location /.well-known/acme-challenge/ {
+        root /var/www/${DOMAIN};
+    }
+    
     location / { 
         return 301 https://\$host\$request_uri; 
     } 
